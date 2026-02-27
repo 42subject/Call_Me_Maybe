@@ -1,0 +1,14 @@
+[project]
+name = "call-me-maybe"
+version = "0.1.0"
+description = "Call Me Maybe rank03 project"
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.5,<2.8",
+    "transformers>=4.52,<5",
+    "numpy>=2.0,<3",
+    "pydantic>=2.9,<3",
+]
+
+[tool.uv]
+package = false
