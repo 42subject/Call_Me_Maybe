@@ -10,7 +10,7 @@ from huggingface_hub import hf_hub_download
 import os
 
 
-logging.set_verbosity_error()  # keep the console clean
+logging.set_verbosity_error()  # type: ignore[no-untyped-call]
 
 
 class Small_LLM_Model:
@@ -55,7 +55,7 @@ class Small_LLM_Model:
         # --- load tokenizer & model -------------------------------------------------
         self._tokenizer: PreTrainedTokenizer = AutoTokenizer.from_pretrained(
             model_name, trust_remote_code=trust_remote_code
-        )
+        )  # type: ignore[no-untyped-call]
         if self._tokenizer.pad_token_id is None:
             # ensure we have a pad token to keep batch helpers happy
             self._tokenizer.pad_token_id = self._tokenizer.eos_token_id
@@ -66,8 +66,8 @@ class Small_LLM_Model:
             device_map="auto" if self._device == "cuda" else None,
             trust_remote_code=trust_remote_code,
         )
-        self._model.to(self._device)
-        self._model.eval()
+        self._model.to(self._device)  # type: ignore[arg-type]
+        self._model.eval()  # type: ignore[no-untyped-call]
 
         # switch to inference-only mode
         for p in self._model.parameters():

@@ -1,4 +1,5 @@
 from enum import Enum
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -20,13 +21,13 @@ class FunctionModel(BaseModel):
 
 
 def validate_functions(
-    functions: list[dict[str, str | dict[str, dict[str, str]]]]
+    functions: list[dict[str, Any]]
 ) -> list[FunctionModel]:
     """
     関数定義の辞書配列をFunctionModel配列へ変換して検証する。
 
     Args:
-        functions (list[dict[str, str | dict[str, dict[str, str]]]]):
+        functions (list[dict[str, Any]]):
             読み込み済みの関数定義辞書配列。
 
     Raises:

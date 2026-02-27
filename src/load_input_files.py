@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 from typing import Any
 
 from .validate_inputs import (
@@ -6,12 +7,15 @@ from .validate_inputs import (
 )
 
 
-def load_json(file_path: str) -> Any:
+PathLike = str | Path
+
+
+def load_json(file_path: PathLike) -> Any:
     """
     指定パスのJSONファイルを読み込み、Pythonオブジェクトとして返す。
 
     Args:
-        file_path (str): 読み込み対象のJSONファイルパス。
+        file_path (PathLike): 読み込み対象のJSONファイルパス。
 
     Raises:
         FileNotFoundError: 指定ファイルが存在しない場合。
@@ -25,12 +29,12 @@ def load_json(file_path: str) -> Any:
     return json_data
 
 
-def load_prompt_file(file_path: str) -> list[PromptModel]:
+def load_prompt_file(file_path: PathLike) -> list[PromptModel]:
     """
     プロンプト定義JSONを読み込み、PromptModel配列に変換する。
 
     Args:
-        file_path (str): プロンプト定義JSONファイルパス。
+        file_path (PathLike): プロンプト定義JSONファイルパス。
 
     Raises:
         ValidationError: プロンプト形式がモデル定義に一致しない場合。
@@ -43,12 +47,12 @@ def load_prompt_file(file_path: str) -> list[PromptModel]:
     return prompt_model_list
 
 
-def load_function_file(file_path: str) -> list[FunctionModel]:
+def load_function_file(file_path: PathLike) -> list[FunctionModel]:
     """
     関数定義JSONを読み込み、FunctionModel配列に変換する。
 
     Args:
-        file_path (str): 関数定義JSONファイルパス。
+        file_path (PathLike): 関数定義JSONファイルパス。
 
     Raises:
         ValidationError: 関数定義形式がモデル定義に一致しない場合。

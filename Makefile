@@ -20,6 +20,7 @@ debug:
 	$(UV) run $(PYTHON) -m pdb src
 
 clean:
+	rm -rf .venv
 	find . -type d -name "__pycache__" -prune -exec rm -rf {} +
 	find . -type d -name ".mypy_cache" -prune -exec rm -rf {} +
 
@@ -29,4 +30,4 @@ lint:
 
 lint-strict:
 	$(UV) run flake8 .
-	$(UV) run mypy . --strict
+	$(UV) run mypy . --strict $(LINT_MYPY_FLAGS)

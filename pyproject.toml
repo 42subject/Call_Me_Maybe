@@ -8,6 +8,7 @@ dependencies = [
     "transformers>=4.52,<5",
     "numpy>=2.0,<3",
     "pydantic>=2.9,<3",
+    "mypy>=1.10,<2",
 ]
 
 [tool.uv]

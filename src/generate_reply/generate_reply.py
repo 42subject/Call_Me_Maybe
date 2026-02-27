@@ -98,9 +98,10 @@ def generate_reply(
     instruction = build_instruction(prompt, functions)
     input_ids = model.encode(instruction)
     bad_words_ids = build_bad_words_ids(model)
+    raw_model: Any = model._model
 
     while True:
-        output_ids = model._model.generate(
+        output_ids = raw_model.generate(
             input_ids=input_ids,
             do_sample=False,
             max_new_tokens=128,
