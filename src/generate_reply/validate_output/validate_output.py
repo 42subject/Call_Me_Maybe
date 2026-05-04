@@ -31,7 +31,7 @@ def validate_output(
             functions_map=functions_map,
         )
     except ValidationError as error:
-        raise ValueError(error)
+        raise ValueError(error) from error
 
     return {
         "prompt": prompt,

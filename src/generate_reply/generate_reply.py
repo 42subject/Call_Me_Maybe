@@ -1,6 +1,5 @@
-from json import JSONDecodeError
 import json
-from typing import Any
+from typing import Any, cast
 
 from llm_sdk import Small_LLM_Model
 
@@ -28,7 +27,7 @@ def extract_first_json_object(text: str) -> dict[str, Any]:
     obj, _ = json.JSONDecoder().raw_decode(text[start:])
     if not isinstance(obj, dict):
         raise ValueError("Decoded JSON is not an object")
-    return obj
+    return cast(dict[str, Any], obj)
 
 
 def build_instruction(prompt: str, functions: list[FunctionModel]) -> str:
@@ -79,6 +78,7 @@ def generate_reply(
     prompt: str,
     functions: list[FunctionModel],
     functions_map: dict[str, FunctionModel],
+    max_retries: int = 3,
 ) -> dict[str, Any]:
     """
     1つのプロンプトに対して、検証済みの関数呼び出しJSONを生成する。
@@ -100,13 +100,12 @@ def generate_reply(
     bad_words_ids = build_bad_words_ids(model)
     raw_model: Any = model._model
 
-    while True:
+    last_error: ValueError | None = None
+    for _ in range(max_retries):
         output_ids = raw_model.generate(
             input_ids=input_ids,
             do_sample=False,
             max_new_tokens=128,
-            eos_token_id=model._tokenizer.eos_token_id,
-            pad_token_id=model._tokenizer.eos_token_id,
             bad_words_ids=bad_words_ids,
             repetition_penalty=1.1,
         )
@@ -115,7 +114,11 @@ def generate_reply(
         try:
             output_obj = extract_first_json_object(reply)
             return validate_output(output_obj, prompt, functions_map)
-        except (ValueError, JSONDecodeError):
-            print("Generate failed. Try again...")
-            continue
-    raise ValueError(f"Failed to generate valid JSON for prompt: {prompt}")
+        except ValueError as error:
+            last_error = error
+            print(f"Generate failed: {error}")
+            print(f"Reply:\n{reply}\n")
+
+    raise ValueError(
+        f"Failed to generate valid JSON for prompt: {prompt}"
+    ) from last_error

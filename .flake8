@@ -1,5 +1,10 @@
 [flake8]
 exclude =
+    .git,
     .venv,
+    venv,
+    env,
     __pycache__,
+    .mypy_cache,
+    .pytest_cache,
     llm_sdk

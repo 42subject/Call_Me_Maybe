@@ -1,8 +1,10 @@
+from json import JSONDecodeError
 from typing import Any
 
 from llm_sdk import Small_LLM_Model
+from pydantic import ValidationError
 
-from .config import FUNCTIONS_PATH, OUTPUT_PATH, PROMPTS_PATH
+from .config import FUNCTIONS_PATH, OUTPUT_PATH, PROMPTS_PATH, MAX_RETRIES
 from .generate_reply import generate_reply
 from .load_input_files import load_function_file, load_prompt_file
 from .output_writer import save_results
@@ -13,10 +15,20 @@ def main() -> None:
     """
     入力JSONを読み込み、LLMで関数呼び出し情報を生成して保存する。
     """
-    prompt_models: list[PromptModel] = load_prompt_file(PROMPTS_PATH)
-    function_models: list[FunctionModel] = load_function_file(
-        FUNCTIONS_PATH
-    )
+    try:
+        prompt_models: list[PromptModel] = load_prompt_file(PROMPTS_PATH)
+        function_models: list[FunctionModel] = load_function_file(
+            FUNCTIONS_PATH
+        )
+    except (
+        FileNotFoundError,
+        JSONDecodeError,
+        TypeError,
+        ValidationError,
+    ) as error:
+        print(f"Error: {error}")
+        return
+
     function_map = {function.name: function for function in function_models}
 
     model = Small_LLM_Model()
@@ -28,6 +40,7 @@ def main() -> None:
                 prompt=prompt_model.prompt,
                 functions=function_models,
                 functions_map=function_map,
+                max_retries=MAX_RETRIES
             )
             results.append(result)
             print(result)
@@ -35,7 +48,7 @@ def main() -> None:
             print(f"Error: {error}")
     try:
         save_results(OUTPUT_PATH, results)
-    except FileNotFoundError as error:
+    except OSError as error:
         print(f"Error: {error}")
 
 
