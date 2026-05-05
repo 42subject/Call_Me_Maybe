@@ -36,6 +36,15 @@ class Small_LLM_Model:
         dtype: torch.dtype | None = None,
         trust_remote_code: bool = True,
     ) -> None:
+        """
+        Hugging Faceモデルとトークナイザーを読み込み推論用に初期化する。
+
+        Args:
+            model_name (str): 読み込むHugging Faceモデル名。
+            device (str | None): 推論に使用するデバイス名。
+            dtype (torch.dtype | None): モデル重みのデータ型。
+            trust_remote_code (bool): リモートコードの実行を許可するか。
+        """
         self._model_name = model_name
 
         # Auto-select device with priority: mps > cuda > cpu
@@ -100,6 +109,12 @@ class Small_LLM_Model:
 
 
     def get_path_to_vocab_file(self) -> str:
+        """
+        使用中トークナイザーの語彙ファイルパスを取得する。
+
+        Returns:
+            str: ローカルに取得された語彙ファイルのパス。
+        """
         vocab_file_name = self._tokenizer.vocab_files_names.get('vocab_file', "vocab.json")
         vocab_path = hf_hub_download(
             repo_id=self._model_name,
@@ -109,6 +124,12 @@ class Small_LLM_Model:
 
 
     def get_path_to_merges_file(self) -> str:
+        """
+        使用中トークナイザーのmergesファイルパスを取得する。
+
+        Returns:
+            str: ローカルに取得されたmergesファイルのパス。
+        """
         merges_file_name = self._tokenizer.vocab_files_names.get('merges_file', "merges.txt")
         merges_path = hf_hub_download(
             repo_id=self._model_name,
@@ -118,6 +139,12 @@ class Small_LLM_Model:
 
 
     def get_path_to_tokenizer_file(self) -> str:
+        """
+        使用中トークナイザーの設定ファイルパスを取得する。
+
+        Returns:
+            str: ローカルに取得されたトークナイザーファイルのパス。
+        """
         tokenizer_file_name = self._tokenizer.vocab_files_names.get('tokenizer_file', "tokenizer.json")
         tokenizer_path = hf_hub_download(
             repo_id=self._model_name,

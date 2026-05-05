@@ -2,6 +2,13 @@ from pydantic import BaseModel, Field
 
 
 class PromptModel(BaseModel):
+    """
+    入力プロンプト1件分のJSON構造を表すモデル。
+
+    Args:
+        prompt (str): 関数呼び出しへ変換する自然言語プロンプト。
+    """
+
     prompt: str = Field(...)
 
 

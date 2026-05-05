@@ -5,15 +5,36 @@ from pydantic import BaseModel, Field
 
 
 class ParameterType(str, Enum):
+    """
+    関数パラメータとして許可される型名を表す列挙型。
+    """
+
     number = "number"
     string = "string"
 
 
 class ParameterModel(BaseModel):
+    """
+    関数パラメータまたは戻り値の型定義を表すモデル。
+
+    Args:
+        type (ParameterType): パラメータまたは戻り値の型。
+    """
+
     type: ParameterType = Field(...)
 
 
 class FunctionModel(BaseModel):
+    """
+    LLMが選択できる関数定義1件分のJSON構造を表すモデル。
+
+    Args:
+        name (str): 関数名。
+        description (str): 関数の説明文。
+        parameters (dict[str, ParameterModel]): 引数名と型定義の辞書。
+        returns (ParameterModel): 戻り値の型定義。
+    """
+
     name: str = Field(...)
     description: str = Field(...)
     parameters: dict[str, ParameterModel] = Field(...)

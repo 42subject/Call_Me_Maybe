@@ -9,25 +9,29 @@ from ..validate_inputs import FunctionModel
 
 def extract_first_json_object(text: str) -> dict[str, Any]:
     """
-    文字列から先頭のJSONオブジェクトを抽出して辞書として返す。
+    文字列から最初にデコード可能なJSONオブジェクトを抽出して返す。
 
     Args:
         text (str): LLMの生出力文字列。
 
     Raises:
-        ValueError: JSON開始位置が見つからない、またはJSONがオブジェクトでない場合。
+        ValueError: JSONオブジェクトが見つからない場合。
         json.JSONDecodeError: JSON構文が不正でデコードできない場合。
 
     Returns:
-        dict[str, Any]: 抽出した先頭JSONオブジェクト。
+        dict[str, Any]: 抽出したJSONオブジェクト。
     """
-    start = text.find("{")
-    if start == -1:
-        raise ValueError("JSON object not found in reply")
-    obj, _ = json.JSONDecoder().raw_decode(text[start:])
-    if not isinstance(obj, dict):
-        raise ValueError("Decoded JSON is not an object")
-    return cast(dict[str, Any], obj)
+    decoder = json.JSONDecoder()
+    for index, char in enumerate(text):
+        if char != "{":
+            continue
+        try:
+            obj, _ = decoder.raw_decode(text[index:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict):
+            return cast(dict[str, Any], obj)
+    raise ValueError("JSON object not found in reply")
 
 
 def build_instruction(prompt: str, functions: list[FunctionModel]) -> str:
@@ -48,29 +52,70 @@ def build_instruction(prompt: str, functions: list[FunctionModel]) -> str:
     )
     return (
         f"User prompt:\n{prompt}\n\n"
-        "Select exactly one function from the function list below.\n"
+        "Use the function list below as reference information.\n"
         f"{functions_json}\n\n"
-        "Return ONLY raw JSON with this exact schema:\n"
+        "Return ONLY one raw JSON object with this schema:\n"
         '{"prompt":"<original prompt>",'
-        '"name":"<function name>","parameters":{...}}\n'
-        "No markdown. No code fences. No extra text."
+        '"fn_name":"<function name>","args":{...}}\n'
+        "fn_name must be a string and args must be an object. "
+        "No examples. No quoted JSON. No markdown. No explanation."
     )
 
 
-def build_bad_words_ids(model: Small_LLM_Model) -> list[list[int]]:
+def encode_token_ids(model: Small_LLM_Model, text: str) -> list[int]:
     """
-    生成時に禁止する文字列のトークンIDリストを作成する。
+    LLM SDKのencode結果を1次元のトークンID配列へ変換する。
 
     Args:
-        model (Small_LLM_Model): トークナイザーを保持するLLMモデルラッパー。
+        model (Small_LLM_Model): エンコードに使用するLLMモデル。
+        text (str): トークンIDへ変換する文字列。
 
     Returns:
-        list[list[int]]: `bad_words_ids` に渡す禁止トークンIDの二次元配列。
+        list[int]: 入力文字列に対応するトークンID配列。
     """
-    return [
-        model._tokenizer.encode("```", add_special_tokens=False),
-        model._tokenizer.encode("'''", add_special_tokens=False),
-    ]
+    encoded: Any = model.encode(text)
+    token_rows: list[list[int]] = encoded.tolist()
+    return token_rows[0]
+
+
+def greedy_json_decode(
+    model: Small_LLM_Model,
+    instruction: str,
+    max_new_tokens: int = 128,
+) -> dict[str, Any]:
+    """
+    LLMの次トークンlogitsを貪欲に選択してJSONオブジェクトを生成する。
+
+    Args:
+        model (Small_LLM_Model): 生成に使用するLLMモデル。
+        instruction (str): 生成前に渡す指示文。
+        max_new_tokens (int): 生成する最大トークン数。
+
+    Raises:
+        ValueError: 最大トークン数内にJSONオブジェクトを抽出できない場合。
+
+    Returns:
+        dict[str, Any]: 生成テキストから抽出したJSONオブジェクト。
+    """
+    context = encode_token_ids(model, instruction + "\n")
+    generated_ids: list[int] = []
+
+    for _ in range(max_new_tokens):
+        logits = model.get_logits_from_input_ids(context)
+        next_token_id = max(
+            range(len(logits)),
+            key=lambda index: logits[index],
+        )
+        context.append(next_token_id)
+        generated_ids.append(next_token_id)
+
+        reply = model.decode(generated_ids).strip()
+        try:
+            return extract_first_json_object(reply)
+        except ValueError:
+            continue
+
+    raise ValueError("JSON object not found in generated reply")
 
 
 def generate_reply(
@@ -88,6 +133,7 @@ def generate_reply(
         prompt (str): ユーザー入力プロンプト。
         functions (list[FunctionModel]): 選択対象となる関数定義一覧。
         functions_map (dict[str, FunctionModel]): 関数名をキーにした関数定義辞書。
+        max_retries (int): 互換性維持のために受け取る再試行回数。
 
     Raises:
         ValueError: 有効なJSONが抽出できない、または定義に一致しない場合。
@@ -96,28 +142,18 @@ def generate_reply(
         dict[str, Any]: 検証済みの関数呼び出し情報。
     """
     instruction = build_instruction(prompt, functions)
-    input_ids = model.encode(instruction)
-    bad_words_ids = build_bad_words_ids(model)
-    raw_model: Any = model._model
-
     last_error: ValueError | None = None
+
     for _ in range(max_retries):
-        output_ids = raw_model.generate(
-            input_ids=input_ids,
-            do_sample=False,
-            max_new_tokens=128,
-            bad_words_ids=bad_words_ids,
-            repetition_penalty=1.1,
-        )
-        new_ids = output_ids[0][input_ids.shape[1]:]
-        reply = model.decode(new_ids).strip()
         try:
-            output_obj = extract_first_json_object(reply)
+            output_obj = greedy_json_decode(model, instruction)
             return validate_output(output_obj, prompt, functions_map)
         except ValueError as error:
             last_error = error
-            print(f"Generate failed: {error}")
-            print(f"Reply:\n{reply}\n")
+            instruction += (
+                "\nPrevious output was invalid. Return one valid JSON object "
+                "with fn_name as a string and args as an object."
+            )
 
     raise ValueError(
         f"Failed to generate valid JSON for prompt: {prompt}"
