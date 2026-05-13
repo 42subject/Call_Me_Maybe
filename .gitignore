@@ -1,3 +1,7 @@
 # cache files
 __pycache__
 .mypy_cache
+.venv
+
+call_me_maybe_ja.pdf
+call_me_maybe.pdf

@@ -15,7 +15,7 @@ install:
 	$(UV) sync
 
 run:
-	$(UV) run $(PYTHON) -m $(MODULE)
+	$(UV) run $(PYTHON) -m $(MODULE) --functions_definition $(FUNCTIONS_DEFINITION) --input $(INPUT) --output $(OUTPUT)
 
 debug:
 	$(UV) run $(PYTHON) -m pdb src
