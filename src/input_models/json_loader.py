@@ -14,7 +14,7 @@ class JsonLoader(BaseModel, ABC):
     def load_raw(self) -> Any:
         text = self.json_path.read_text(encoding="utf-8")
         return json.loads(text)
-    
+
     @abstractmethod
     def load(self) -> Any:
         pass

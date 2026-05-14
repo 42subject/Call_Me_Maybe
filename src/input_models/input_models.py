@@ -13,7 +13,7 @@ class ParameterType(str, Enum):
     NUMBER = "number"
     OBJECT = "object"
     ARRAY = "array"
-    
+
 
 class FunctionParametersModel(BaseModel):
     type: ParameterType
@@ -45,7 +45,7 @@ class FunctionParametersModel(BaseModel):
 
         if self.type != ParameterType.ARRAY and self.items is not None:
             raise ValueError("items is only allowed for array type")
-        
+
         return self
 
 

@@ -18,11 +18,12 @@ class ArgvModel(BaseModel):
         argc = len(argv)
 
         if argc == 1:
-            return cls.model_validate({
+            parsed_default: ArgvModel = cls.model_validate({
                 "functions_definition": FUNCTIONS_DEFINITION,
                 "input": INPUT,
                 "output": OUTPUT
             })
+            return parsed_default
         if argc == 7:
             parsed_argv_dict: dict[str, str] = {}
             for key, value in zip(argv[1::2], argv[2::2]):
@@ -35,28 +36,27 @@ class ArgvModel(BaseModel):
         else:
             raise ValueError("Invalid argv")
 
-        return cls.model_validate(parsed_argv_dict)
+        parsed_args: ArgvModel = cls.model_validate(parsed_argv_dict)
+        return parsed_args
 
 
-def main():
+def main() -> None:
     try:
         paths = ArgvModel.parse_argv(sys.argv)
     except ValueError as error:
         print(f"Error: {error}")
         return
-    
+
     try:
-        prompts = PromptLoader(json_path=paths.input)
-        prompts = prompts.load()
-        functions = FunctionLoader(json_path=paths.functions_definition)
-        functions = functions.load()
+        prompts = PromptLoader(json_path=paths.input).load()
+        functions = FunctionLoader(json_path=paths.functions_definition).load()
     except (
-        ValueError, 
+        ValueError,
         FileNotFoundError, IsADirectoryError, PermissionError
     ) as error:
         print(f"Error: {error}")
         return
-    
+
     try:
         qwen_client = QwenClient("Qwen/Qwen3-0.6B", functions)
         response = qwen_client.generate(prompts)

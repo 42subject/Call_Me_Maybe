@@ -30,5 +30,5 @@ lint:
 	$(UV) run mypy $(LINT_TARGETS) $(LINT_MYPY_FLAGS)
 
 lint-strict:
-	$(UV) run flake8 $(LINT_TARGETS)
+	make lint
 	$(UV) run mypy $(LINT_TARGETS) --strict
