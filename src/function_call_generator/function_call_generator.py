@@ -32,16 +32,17 @@ class PromptBuilder(BaseModel):
             f"{index}. {prompt.prompt}"
             for index, prompt in enumerate(prompts, start=1)
         )
+        builded_prompt = ""
 
-        builded_prompt = (
+        builded_prompt += (
             "You are a function calling assistant.\n"
             "Choose the best function for each user prompt "
             f"Available functions:\n{self.functions_text}\n\n"
             f"User prompts:\n{prompts_text}\n\n"
-            # "You must return only valid json and chose "
-            # "prompt, fn_name, args.\n"
-            # "For each result, the value of prompt must repeat the exact "
-            # "original user prompt text, not the function name.\n"
+            "You must return only valid json and chose "
+            "prompt, fn_name, args.\n"
+            "For each result, the value of prompt must repeat the exact "
+            "original user prompt text, not the function name.\n"
         )
 
         if feedbacks:
@@ -123,7 +124,7 @@ class QwenClient(LLMClient):
     def _generate_response(self, token_ids: list[int]) -> str:
         generated_text: str = ""
 
-        for _ in range(1000):
+        for _ in range(100):
             logits = self.model.get_logits_from_input_ids(token_ids)
             next_str, next_token_id = self._select_valid_text_from_logits(
                 logits
