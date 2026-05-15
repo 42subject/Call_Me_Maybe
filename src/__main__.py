@@ -4,8 +4,8 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from .paths import FUNCTIONS_DEFINITION, INPUT, OUTPUT
-from .input_models import PromptLoader, FunctionLoader
 from .function_call_generator import QwenClient
+from .json_io import JsonIO
 
 
 class ArgvModel(BaseModel):
@@ -48,8 +48,13 @@ def main() -> None:
         return
 
     try:
-        prompts = PromptLoader(json_path=paths.input).load()
-        functions = FunctionLoader(json_path=paths.functions_definition).load()
+        json_io = JsonIO(
+            prompt_path=paths.input,
+            functions_path=paths.functions_definition,
+            output_path=paths.output,
+        )
+        prompts = json_io.load_prompts()
+        functions = json_io.load_functions()
     except (
         ValueError,
         FileNotFoundError, IsADirectoryError, PermissionError
@@ -60,10 +65,17 @@ def main() -> None:
     try:
         qwen_client = QwenClient("Qwen/Qwen3-0.6B", functions)
         response = qwen_client.generate(prompts)
-        print(response)
     except ValueError as error:
         print(f"Error: {error}")
         return
+
+    try:
+        json_io.write_responses(response)
+    except ValueError as error:
+        print(f"Error: {error}")
+        return
+
+    return
 
 
 if __name__ == "__main__":

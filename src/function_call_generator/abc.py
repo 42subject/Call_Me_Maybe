@@ -1,11 +1,13 @@
 from abc import ABC, abstractmethod
 
+from pydantic import BaseModel
+
 from ..input_models import PromptModel
 
 from .response_model import ResponseModel
 
 
-class Tokenizer(ABC):
+class Tokenizer(BaseModel, ABC):
     @abstractmethod
     def encode(self, text: str) -> list[int]:
         pass
@@ -15,7 +17,7 @@ class Tokenizer(ABC):
         pass
 
 
-class LLMClient(ABC):
+class LLMClient(BaseModel, ABC):
     @abstractmethod
     def generate(
         self,

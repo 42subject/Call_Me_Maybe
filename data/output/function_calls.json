@@ -8,79 +8,20 @@
     }
   },
   {
-    "prompt": "What is the sum of 265 and 345?",
-    "fn_name": "fn_add_numbers",
+    "prompt": "Create a user profile for Alice with email alice@example.com, phone 090-1234-5678, and tags admin and beta.",
+    "fn_name": "fn_create_user_profile",
     "args": {
-      "a": 265,
-      "b": 345
-    }
-  },
-  {
-    "prompt": "Greet shrek",
-    "fn_name": "fn_greet",
-    "args": {
-      "name": "Shrek"
-    }
-  },
-  {
-    "prompt": "Greet john",
-    "fn_name": "fn_greet",
-    "args": {
-      "name": "john"
-    }
-  },
-  {
-    "prompt": "Reverse the string 'hello'",
-    "fn_name": "fn_reverse_string",
-    "args": {
-      "s": "hello"
-    }
-  },
-  {
-    "prompt": "Reverse the string 'world'",
-    "fn_name": "fn_reverse_string",
-    "args": {
-      "s": "world"
-    }
-  },
-  {
-    "prompt": "What is the square root of 16?",
-    "fn_name": "fn_get_square_root",
-    "args": {
-      "a": 16
-    }
-  },
-  {
-    "prompt": "Calculate the square root of 144",
-    "fn_name": "fn_get_square_root",
-    "args": {
-      "a": 144
-    }
-  },
-  {
-    "prompt": "Replace all numbers in \"Hello 34 I'm 233 years old\" with NUMBERS",
-    "fn_name": "fn_add_numbers",
-    "args": {
-      "a": 34,
-      "b": 233
-    }
-  },
-  {
-    "prompt": "Replace all vowels in 'Programming is fun' with asterisks",
-    "fn_name": "fn_substitute_string_with_regex",
-    "args": {
-      "source_string": "Programming is fun",
-      "regex": "[aeiouAEIOU]",
-      "replacement": "*"
-    }
-  },
-  {
-    "prompt": "Substitute the word 'cat' with 'dog' in 'The cat sat on the mat with another cat'",
-    "fn_name": "fn_substitute_string_with_regex",
-    "args": {
-      "source_string": "The cat sat on the mat with another cat",
-      "regex": "cat",
-      "replacement": "dog"
+      "profile": {
+        "name": "Alice",
+        "contact": {
+          "email": "alice@example.com",
+          "phone": "090-1234-5678"
+        },
+        "tags": [
+          "admin",
+          "beta"
+        ]
+      }
     }
   }
 ]

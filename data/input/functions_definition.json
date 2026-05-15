@@ -67,5 +67,69 @@
     "returns": {
       "type": "string"
     }
+  },
+  {
+    "name": "fn_create_user_profile",
+    "description": "Create a user profile with nested contact details and tags.",
+    "parameters": {
+      "profile": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "contact": {
+            "type": "object",
+            "properties": {
+              "email": {
+                "type": "string"
+              },
+              "phone": {
+                "type": "string"
+              }
+            }
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "returns": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "number"
+        },
+        "profile": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "contact": {
+              "type": "object",
+              "properties": {
+                "email": {
+                  "type": "string"
+                },
+                "phone": {
+                  "type": "string"
+                }
+              }
+            },
+            "tags": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
   }
 ]

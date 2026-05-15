@@ -1,16 +1,19 @@
+from typing import ClassVar
+
+from pydantic import BaseModel
+
 from .abc import Tokenizer
 
 
-class Visualizer:
-    TOTAL_LINES = 7
-    GENERATED_LINE = 0
-    REJECTED_LINE = 1
-    TOP_TOKEN_START_LINE = 2
-    TOP_TOKEN_LIMIT = 5
+class Visualizer(BaseModel):
+    TOTAL_LINES: ClassVar[int] = 7
+    GENERATED_LINE: ClassVar[int] = 0
+    REJECTED_LINE: ClassVar[int] = 1
+    TOP_TOKEN_START_LINE: ClassVar[int] = 2
+    TOP_TOKEN_LIMIT: ClassVar[int] = 5
 
-    def __init__(self, tokenizer: Tokenizer) -> None:
-        self.tokenizer = tokenizer
-        self.is_initialized = False
+    tokenizer: Tokenizer
+    is_initialized: bool = False
 
     def initialize(self) -> None:
         if self.is_initialized:

@@ -1,8 +1,22 @@
 import json
+from typing import ClassVar, TypedDict
+
+from pydantic import BaseModel
 
 
-class JsonValidator:
-    def __init__(self) -> None:
+class JsonFrame(TypedDict):
+    type: str
+    state: str
+    role: str
+    key_index: int
+    current_key: str
+
+
+class JsonValidator(BaseModel):
+    RESPONSE_KEYS: ClassVar[tuple[str, ...]] = ("prompt", "fn_name", "args")
+    text: str = ""
+
+    def reset(self) -> None:
         self.text = ""
 
     def is_valid_string(self, text: str) -> bool:
@@ -20,9 +34,10 @@ class JsonValidator:
         return True
 
     def _is_valid_json_prefix(self, text: str) -> bool:
-        stack: list[dict[str, str]] = []
+        stack: list[JsonFrame] = []
         state = {"mode": "start"}
         string_kind = ""
+        key_buffer = ""
         literal = ""
         literal_index = 0
         number_state = ""
@@ -41,7 +56,10 @@ class JsonValidator:
             if not stack:
                 state["mode"] = "after_end"
                 return
-            stack[-1]["state"] = "after_value"
+            frame = stack[-1]
+            frame["state"] = "after_value"
+            if frame["role"] == "response":
+                frame["key_index"] += 1
             state["mode"] = "normal"
 
         def start_value(char: str) -> bool:
@@ -51,11 +69,29 @@ class JsonValidator:
                 string_kind = "value"
                 return True
             if char == "{":
-                stack.append({"type": "object", "state": "expect_key_or_end"})
+                role = "response" if is_response_object() else "normal"
+                stack.append(
+                    {
+                        "type": "object",
+                        "state": "expect_key_or_end",
+                        "role": role,
+                        "key_index": 0,
+                        "current_key": "",
+                    }
+                )
                 state["mode"] = "normal"
                 return True
             if char == "[":
-                stack.append({"type": "array", "state": "expect_value_or_end"})
+                role = "root_array" if not stack else "normal"
+                stack.append(
+                    {
+                        "type": "array",
+                        "state": "expect_value_or_end",
+                        "role": role,
+                        "key_index": 0,
+                        "current_key": "",
+                    }
+                )
                 state["mode"] = "normal"
                 return True
             if char == "t":
@@ -87,6 +123,23 @@ class JsonValidator:
                 return True
             return False
 
+        def is_response_object() -> bool:
+            if not stack:
+                return False
+            parent = stack[-1]
+            return (
+                parent["type"] == "array"
+                and parent["role"] == "root_array"
+                and parent["state"] in {"expect_value_or_end", "expect_value"}
+            )
+
+        def expected_response_key(frame: JsonFrame) -> str | None:
+            if frame["role"] != "response":
+                return None
+            if frame["key_index"] >= len(self.RESPONSE_KEYS):
+                return None
+            return self.RESPONSE_KEYS[frame["key_index"]]
+
         def finish_container(char: str) -> bool:
             if not stack:
                 return False
@@ -102,6 +155,10 @@ class JsonValidator:
                 frame["type"] == "object"
                 and char == "}"
                 and frame["state"] in {"expect_key_or_end", "after_value"}
+                and (
+                    frame["role"] != "response"
+                    or frame["key_index"] == len(self.RESPONSE_KEYS)
+                )
             ):
                 value_finished()
                 return True
@@ -192,10 +249,26 @@ class JsonValidator:
                     escape = True
                 elif char == '"':
                     if string_kind == "key":
+                        frame = stack[-1]
+                        expected_key = expected_response_key(frame)
+                        if (
+                            expected_key is not None
+                            and key_buffer != expected_key
+                        ):
+                            return False
+                        frame["current_key"] = key_buffer
                         stack[-1]["state"] = "after_key"
                         state["mode"] = "normal"
                     else:
                         value_finished()
+                elif string_kind == "key":
+                    key_buffer += char
+                    expected_key = expected_response_key(stack[-1])
+                    if (
+                        expected_key is not None
+                        and not expected_key.startswith(key_buffer)
+                    ):
+                        return False
                 elif ord(char) < 0x20:
                     return False
                 index += 1
@@ -229,7 +302,7 @@ class JsonValidator:
                 continue
 
             if mode == "start":
-                if not start_value(char):
+                if char != "[" or not start_value(char):
                     return False
                 index += 1
                 continue
@@ -269,6 +342,7 @@ class JsonValidator:
                     elif char == '"':
                         state["mode"] = "string"
                         string_kind = "key"
+                        key_buffer = ""
                     else:
                         return False
                 elif frame["state"] == "expect_key":
@@ -276,6 +350,7 @@ class JsonValidator:
                         return False
                     state["mode"] = "string"
                     string_kind = "key"
+                    key_buffer = ""
                 elif frame["state"] == "after_key":
                     if char != ":":
                         return False
@@ -285,6 +360,11 @@ class JsonValidator:
                         return False
                 elif frame["state"] == "after_value":
                     if char == ",":
+                        if (
+                            frame["role"] == "response"
+                            and frame["key_index"] >= len(self.RESPONSE_KEYS)
+                        ):
+                            return False
                         frame["state"] = "expect_key"
                     elif char == "}":
                         if not finish_container(char):
