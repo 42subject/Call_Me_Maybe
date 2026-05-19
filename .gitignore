@@ -3,5 +3,8 @@ __pycache__
 .mypy_cache
 .venv
 
+# result
+data/output
+
 call_me_maybe_ja.pdf
 call_me_maybe.pdf
