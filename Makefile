@@ -5,7 +5,7 @@ LINT_TARGETS := src
 
 FUNCTIONS_DEFINITION := data/input/functions_definition.json
 INPUT := data/input/function_calling_tests.json
-OUTPUT := data/output/function_calls.json
+OUTPUT := data/output/function_calling_results.json
 
 LINT_MYPY_FLAGS := --follow-imports=skip --warn-return-any --warn-unused-ignores --ignore-missing-imports --disallow-untyped-defs --check-untyped-defs
 

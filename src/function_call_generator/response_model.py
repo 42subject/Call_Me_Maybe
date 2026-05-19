@@ -1,7 +1,13 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class ResponseModel(BaseModel):
+    """
+    生成された関数呼び出し結果を表す
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
     prompt: str
-    fn_name: str
-    args: dict[str, object]
+    name: str
+    parameters: dict[str, object]

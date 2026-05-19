@@ -1,25 +1,58 @@
 import json
 from typing import ClassVar, TypedDict
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from ..input_models import FunctionParametersModel
 
 
 class JsonFrame(TypedDict):
+    """
+    JSON prefix validation中のスタックフレームを表す
+    """
+
     type: str
     state: str
     role: str
     key_index: int
     current_key: str
+    properties: dict[str, FunctionParametersModel]
+    items: FunctionParametersModel | None
+    seen_keys: set[str]
 
 
 class JsonValidator(BaseModel):
-    RESPONSE_KEYS: ClassVar[tuple[str, ...]] = ("prompt", "fn_name", "args")
+    """
+    生成中の文字列が期待するJSON形式のprefixとして有効かを判定する
+    """
+
+    RESPONSE_KEYS: ClassVar[tuple[str, ...]] = (
+        "prompt",
+        "name",
+        "parameters",
+    )
+    function_names: tuple[str, ...] = ()
+    function_parameters: dict[str, dict[str, FunctionParametersModel]] = Field(
+        default_factory=dict
+    )
     text: str = ""
 
     def reset(self) -> None:
+        """
+        検証中のJSON文字列を空に戻す
+        """
         self.text = ""
 
     def is_valid_string(self, text: str) -> bool:
+        """
+        文字列を追加してもJSON prefixとして有効かを判定する
+
+        Args:
+            text: 追加候補の文字列
+
+        Returns:
+            bool: 追加後も有効なJSON prefixならTrue
+        """
         next_text = self.text + text
         if not self._is_valid_json_prefix(next_text):
             return False
@@ -27,6 +60,12 @@ class JsonValidator(BaseModel):
         return True
 
     def is_complete(self) -> bool:
+        """
+        現在の文字列が完全なJSONとして読み込めるかを判定する
+
+        Returns:
+            bool: 完全なJSONならTrue
+        """
         try:
             json.loads(self.text)
         except json.JSONDecodeError:
@@ -34,16 +73,45 @@ class JsonValidator(BaseModel):
         return True
 
     def _is_valid_json_prefix(self, text: str) -> bool:
+        """
+        文字列が期待するJSON形式のprefixとして有効かを判定する
+
+        Args:
+            text: 判定する文字列
+
+        Returns:
+            bool: 有効なJSON prefixならTrue
+        """
         stack: list[JsonFrame] = []
         state = {"mode": "start"}
         string_kind = ""
         key_buffer = ""
+        value_buffer = ""
         literal = ""
         literal_index = 0
         number_state = ""
         escape = False
         unicode_escape_count = 0
         index = 0
+        selected_function_name = ""
+
+        def build_frame(
+            frame_type: str,
+            state_name: str,
+            role: str,
+            properties: dict[str, FunctionParametersModel] | None = None,
+            items: FunctionParametersModel | None = None,
+        ) -> JsonFrame:
+            return {
+                "type": frame_type,
+                "state": state_name,
+                "role": role,
+                "key_index": 0,
+                "current_key": "",
+                "properties": properties or {},
+                "items": items,
+                "seen_keys": set(),
+            }
 
         def is_hex(char: str) -> bool:
             return (
@@ -63,61 +131,115 @@ class JsonValidator(BaseModel):
             state["mode"] = "normal"
 
         def start_value(char: str) -> bool:
-            nonlocal string_kind, literal, literal_index, number_state
+            nonlocal string_kind, value_buffer, literal
+            nonlocal literal_index, number_state
+            expected_schema = get_expected_schema()
             if char == '"':
+                if (
+                    expected_schema is not None
+                    and expected_schema.type.value != "string"
+                ):
+                    return False
                 state["mode"] = "string"
                 string_kind = "value"
+                value_buffer = ""
                 return True
             if char == "{":
-                role = "response" if is_response_object() else "normal"
-                stack.append(
-                    {
-                        "type": "object",
-                        "state": "expect_key_or_end",
-                        "role": role,
-                        "key_index": 0,
-                        "current_key": "",
-                    }
-                )
+                if is_parameters_value():
+                    parameters = self.function_parameters.get(
+                        selected_function_name,
+                        {},
+                    )
+                    stack.append(
+                        build_frame(
+                            "object",
+                            "expect_key_or_end",
+                            "schema_object",
+                            parameters,
+                        )
+                    )
+                elif expected_schema is not None:
+                    if expected_schema.type.value != "object":
+                        return False
+                    stack.append(
+                        build_frame(
+                            "object",
+                            "expect_key_or_end",
+                            "schema_object",
+                            expected_schema.properties,
+                        )
+                    )
+                else:
+                    role = "response" if is_response_object() else "normal"
+                    stack.append(
+                        build_frame("object", "expect_key_or_end", role)
+                    )
                 state["mode"] = "normal"
                 return True
             if char == "[":
-                role = "root_array" if not stack else "normal"
-                stack.append(
-                    {
-                        "type": "array",
-                        "state": "expect_value_or_end",
-                        "role": role,
-                        "key_index": 0,
-                        "current_key": "",
-                    }
-                )
+                if expected_schema is not None:
+                    if expected_schema.type.value != "array":
+                        return False
+                    stack.append(
+                        build_frame(
+                            "array",
+                            "expect_value_or_end",
+                            "schema_array",
+                            items=expected_schema.items,
+                        )
+                    )
+                else:
+                    role = "root_array" if not stack else "normal"
+                    stack.append(
+                        build_frame("array", "expect_value_or_end", role)
+                    )
                 state["mode"] = "normal"
                 return True
             if char == "t":
+                if expected_schema is not None:
+                    return False
                 state["mode"] = "literal"
                 literal = "true"
                 literal_index = 1
                 return True
             if char == "f":
+                if expected_schema is not None:
+                    return False
                 state["mode"] = "literal"
                 literal = "false"
                 literal_index = 1
                 return True
             if char == "n":
+                if expected_schema is not None:
+                    return False
                 state["mode"] = "literal"
                 literal = "null"
                 literal_index = 1
                 return True
             if char == "-":
+                if (
+                    expected_schema is not None
+                    and expected_schema.type.value != "number"
+                ):
+                    return False
                 state["mode"] = "number"
                 number_state = "after_minus"
                 return True
             if char == "0":
+                if (
+                    expected_schema is not None
+                    and expected_schema.type.value != "number"
+                ):
+                    return False
                 state["mode"] = "number"
                 number_state = "int_zero"
                 return True
             if "1" <= char <= "9":
+                if (
+                    expected_schema is not None
+                    and expected_schema.type.value != "number"
+                ):
+                    return False
                 state["mode"] = "number"
                 number_state = "int_digits"
                 return True
@@ -140,6 +262,76 @@ class JsonValidator(BaseModel):
                 return None
             return self.RESPONSE_KEYS[frame["key_index"]]
 
+        def is_name_value() -> bool:
+            if not stack:
+                return False
+            frame = stack[-1]
+            return (
+                frame["type"] == "object"
+                and frame["role"] == "response"
+                and frame["current_key"] == "name"
+            )
+
+        def is_parameters_value() -> bool:
+            if not stack:
+                return False
+            frame = stack[-1]
+            return (
+                frame["type"] == "object"
+                and frame["role"] == "response"
+                and frame["current_key"] == "parameters"
+            )
+
+        def get_expected_schema() -> FunctionParametersModel | None:
+            if not stack:
+                return None
+            frame = stack[-1]
+            if (
+                frame["role"] == "schema_object"
+                and frame["state"] == "expect_value"
+            ):
+                return frame["properties"].get(frame["current_key"])
+            if (
+                frame["role"] == "schema_array"
+                and frame["state"] in {"expect_value_or_end", "expect_value"}
+            ):
+                return frame["items"]
+            return None
+
+        def is_valid_function_name_prefix(value: str) -> bool:
+            if not self.function_names:
+                return True
+            return any(
+                function_name.startswith(value)
+                for function_name in self.function_names
+            )
+
+        def expected_schema_key(frame: JsonFrame) -> str | None:
+            if frame["role"] != "schema_object":
+                return None
+            candidates = [
+                key for key in frame["properties"]
+                if key not in frame["seen_keys"]
+            ]
+            for key in candidates:
+                if key == key_buffer:
+                    return key
+            return None
+
+        def is_valid_schema_key_prefix(frame: JsonFrame, value: str) -> bool:
+            if frame["role"] != "schema_object":
+                return True
+            return any(
+                key.startswith(value)
+                for key in frame["properties"]
+                if key not in frame["seen_keys"]
+            )
+
+        def has_all_schema_keys(frame: JsonFrame) -> bool:
+            if frame["role"] != "schema_object":
+                return True
+            return frame["seen_keys"] == set(frame["properties"])
+
         def finish_container(char: str) -> bool:
             if not stack:
                 return False
@@ -155,6 +347,7 @@ class JsonValidator(BaseModel):
                 frame["type"] == "object"
                 and char == "}"
                 and frame["state"] in {"expect_key_or_end", "after_value"}
+                and has_all_schema_keys(frame)
                 and (
                     frame["role"] != "response"
                     or frame["key_index"] == len(self.RESPONSE_KEYS)
@@ -256,10 +449,25 @@ class JsonValidator(BaseModel):
                             and key_buffer != expected_key
                         ):
                             return False
+                        if (
+                            frame["role"] == "schema_object"
+                            and expected_schema_key(frame) is None
+                        ):
+                            return False
+                        if frame["role"] == "schema_object":
+                            frame["seen_keys"].add(key_buffer)
                         frame["current_key"] = key_buffer
                         stack[-1]["state"] = "after_key"
                         state["mode"] = "normal"
                     else:
+                        if (
+                            is_name_value()
+                            and self.function_names
+                            and value_buffer not in self.function_names
+                        ):
+                            return False
+                        if is_name_value():
+                            selected_function_name = value_buffer
                         value_finished()
                 elif string_kind == "key":
                     key_buffer += char
@@ -269,8 +477,14 @@ class JsonValidator(BaseModel):
                         and not expected_key.startswith(key_buffer)
                     ):
                         return False
+                    if not is_valid_schema_key_prefix(stack[-1], key_buffer):
+                        return False
                 elif ord(char) < 0x20:
                     return False
+                elif is_name_value():
+                    value_buffer += char
+                    if not is_valid_function_name_prefix(value_buffer):
+                        return False
                 index += 1
                 continue
 

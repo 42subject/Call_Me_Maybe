@@ -5,10 +5,18 @@ from typing import Optional
 
 
 class PromptModel(BaseModel):
+    """
+    入力プロンプトを表す
+    """
+
     prompt: str
 
 
 class ParameterType(str, Enum):
+    """
+    関数パラメータで利用できる型を表す
+    """
+
     STR = "string"
     NUMBER = "number"
     OBJECT = "object"
@@ -16,6 +24,10 @@ class ParameterType(str, Enum):
 
 
 class FunctionParametersModel(BaseModel):
+    """
+    関数の引数または戻り値の型定義を表す
+    """
+
     type: ParameterType
     properties: Optional[dict[str, "FunctionParametersModel"]] = None
     items: Optional["FunctionParametersModel"] = None
@@ -50,6 +62,10 @@ class FunctionParametersModel(BaseModel):
 
 
 class FunctionModel(BaseModel):
+    """
+    LLMが呼び出し候補として利用する関数定義を表す
+    """
+
     name: str
     description: str
     parameters: dict[str, FunctionParametersModel]
