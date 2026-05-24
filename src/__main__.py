@@ -92,9 +92,7 @@ def main() -> None:
     try:
         json_io.write_responses(response)
     except (
-        FileExistsError,
-        IsADirectoryError,
-        PermissionError,
+        FileExistsError, IsADirectoryError, PermissionError,
         TypeError,
         UnicodeEncodeError,
         ValueError,

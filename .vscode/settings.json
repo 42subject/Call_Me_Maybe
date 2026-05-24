@@ -1,9 +1,0 @@
-{
-  "flake8.args": [],
-  "flake8.path": [
-    "${workspaceFolder}/tools/vscode-flake8"
-  ],
-  "python.analysis.diagnosticSeverityOverrides": {
-    "reportUnknownVariableType": "none"
-  }
-}

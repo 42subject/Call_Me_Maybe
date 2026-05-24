@@ -1,4 +1,5 @@
 import json
+from enum import Enum
 from typing import ClassVar, TypedDict
 
 from pydantic import BaseModel, Field
@@ -6,14 +7,48 @@ from pydantic import BaseModel, Field
 from ..input_models import FunctionParametersModel
 
 
+class FrameType(str, Enum):
+    """
+    JSON prefix validation中のコンテナ種別を表す
+    """
+
+    ARRAY = "array"
+    OBJECT = "object"
+
+
+class FrameState(str, Enum):
+    """
+    JSON prefix validation中のコンテナ内状態を表す
+    """
+
+    EXPECT_VALUE_OR_END = "expect_value_or_end"
+    EXPECT_VALUE = "expect_value"
+    AFTER_VALUE = "after_value"
+    EXPECT_KEY_OR_END = "expect_key_or_end"
+    EXPECT_KEY = "expect_key"
+    AFTER_KEY = "after_key"
+
+
+class FrameRole(str, Enum):
+    """
+    JSON prefix validation中のコンテナの役割を表す
+    """
+
+    ROOT_ARRAY = "root_array"
+    RESPONSE = "response"
+    SCHEMA_OBJECT = "schema_object"
+    SCHEMA_ARRAY = "schema_array"
+    NORMAL = "normal"
+
+
 class JsonFrame(TypedDict):
     """
     JSON prefix validation中のスタックフレームを表す
     """
 
-    type: str
-    state: str
-    role: str
+    type: FrameType
+    state: FrameState
+    role: FrameRole
     key_index: int
     current_key: str
     properties: dict[str, FunctionParametersModel]
@@ -96,9 +131,9 @@ class JsonValidator(BaseModel):
         selected_function_name = ""
 
         def build_frame(
-            frame_type: str,
-            state_name: str,
-            role: str,
+            frame_type: FrameType,
+            state_name: FrameState,
+            role: FrameRole,
             properties: dict[str, FunctionParametersModel] | None = None,
             items: FunctionParametersModel | None = None,
         ) -> JsonFrame:
@@ -125,8 +160,8 @@ class JsonValidator(BaseModel):
                 state["mode"] = "after_end"
                 return
             frame = stack[-1]
-            frame["state"] = "after_value"
-            if frame["role"] == "response":
+            frame["state"] = FrameState.AFTER_VALUE
+            if frame["role"] == FrameRole.RESPONSE:
                 frame["key_index"] += 1
             state["mode"] = "normal"
 
@@ -134,129 +169,150 @@ class JsonValidator(BaseModel):
             nonlocal string_kind, value_buffer, literal
             nonlocal literal_index, number_state
             expected_schema = get_expected_schema()
-            if char == '"':
-                if (
-                    expected_schema is not None
-                    and expected_schema.type.value != "string"
-                ):
-                    return False
-                state["mode"] = "string"
-                string_kind = "value"
-                value_buffer = ""
-                return True
-            if char == "{":
-                if is_parameters_value():
-                    parameters = self.function_parameters.get(
-                        selected_function_name,
-                        {},
-                    )
-                    stack.append(
-                        build_frame(
-                            "object",
-                            "expect_key_or_end",
-                            "schema_object",
-                            parameters,
-                        )
-                    )
-                elif expected_schema is not None:
-                    if expected_schema.type.value != "object":
+            match char:
+                case '"':
+                    if (
+                        expected_schema is not None
+                        and expected_schema.type.value != "string"
+                    ):
                         return False
-                    stack.append(
-                        build_frame(
-                            "object",
-                            "expect_key_or_end",
-                            "schema_object",
-                            expected_schema.properties,
+                    state["mode"] = "string"
+                    string_kind = "value"
+                    value_buffer = ""
+                    return True
+                case "{":
+                    if is_parameters_value():
+                        parameters = self.function_parameters.get(
+                            selected_function_name,
+                            {},
                         )
-                    )
-                else:
-                    role = "response" if is_response_object() else "normal"
-                    stack.append(
-                        build_frame("object", "expect_key_or_end", role)
-                    )
-                state["mode"] = "normal"
-                return True
-            if char == "[":
-                if expected_schema is not None:
-                    if expected_schema.type.value != "array":
+                        stack.append(
+                            build_frame(
+                                FrameType.OBJECT,
+                                FrameState.EXPECT_KEY_OR_END,
+                                FrameRole.SCHEMA_OBJECT,
+                                parameters,
+                            )
+                        )
+                    elif expected_schema is not None:
+                        if expected_schema.type.value != "object":
+                            return False
+                        stack.append(
+                            build_frame(
+                                FrameType.OBJECT,
+                                FrameState.EXPECT_KEY_OR_END,
+                                FrameRole.SCHEMA_OBJECT,
+                                expected_schema.properties,
+                            )
+                        )
+                    else:
+                        role = (
+                            FrameRole.RESPONSE
+                            if is_response_object()
+                            else FrameRole.NORMAL
+                        )
+                        stack.append(
+                            build_frame(
+                                FrameType.OBJECT,
+                                FrameState.EXPECT_KEY_OR_END,
+                                role,
+                            )
+                        )
+                    state["mode"] = "normal"
+                    return True
+                case "[":
+                    if expected_schema is not None:
+                        if expected_schema.type.value != "array":
+                            return False
+                        stack.append(
+                            build_frame(
+                                FrameType.ARRAY,
+                                FrameState.EXPECT_VALUE_OR_END,
+                                FrameRole.SCHEMA_ARRAY,
+                                items=expected_schema.items,
+                            )
+                        )
+                    else:
+                        role = (
+                            FrameRole.ROOT_ARRAY
+                            if not stack
+                            else FrameRole.NORMAL
+                        )
+                        stack.append(
+                            build_frame(
+                                FrameType.ARRAY,
+                                FrameState.EXPECT_VALUE_OR_END,
+                                role,
+                            )
+                        )
+                    state["mode"] = "normal"
+                    return True
+                case "t":
+                    if expected_schema is not None:
                         return False
-                    stack.append(
-                        build_frame(
-                            "array",
-                            "expect_value_or_end",
-                            "schema_array",
-                            items=expected_schema.items,
-                        )
-                    )
-                else:
-                    role = "root_array" if not stack else "normal"
-                    stack.append(
-                        build_frame("array", "expect_value_or_end", role)
-                    )
-                state["mode"] = "normal"
-                return True
-            if char == "t":
-                if expected_schema is not None:
+                    state["mode"] = "literal"
+                    literal = "true"
+                    literal_index = 1
+                    return True
+                case "f":
+                    if expected_schema is not None:
+                        return False
+                    state["mode"] = "literal"
+                    literal = "false"
+                    literal_index = 1
+                    return True
+                case "n":
+                    if expected_schema is not None:
+                        return False
+                    state["mode"] = "literal"
+                    literal = "null"
+                    literal_index = 1
+                    return True
+                case "-":
+                    if (
+                        expected_schema is not None
+                        and expected_schema.type.value != "number"
+                    ):
+                        return False
+                    state["mode"] = "number"
+                    number_state = "after_minus"
+                    return True
+                case "0":
+                    if (
+                        expected_schema is not None
+                        and expected_schema.type.value != "number"
+                    ):
+                        return False
+                    state["mode"] = "number"
+                    number_state = "int_zero"
+                    return True
+                case _ if "1" <= char <= "9":
+                    if (
+                        expected_schema is not None
+                        and expected_schema.type.value != "number"
+                    ):
+                        return False
+                    state["mode"] = "number"
+                    number_state = "int_digits"
+                    return True
+                case _:
                     return False
-                state["mode"] = "literal"
-                literal = "true"
-                literal_index = 1
-                return True
-            if char == "f":
-                if expected_schema is not None:
-                    return False
-                state["mode"] = "literal"
-                literal = "false"
-                literal_index = 1
-                return True
-            if char == "n":
-                if expected_schema is not None:
-                    return False
-                state["mode"] = "literal"
-                literal = "null"
-                literal_index = 1
-                return True
-            if char == "-":
-                if (
-                    expected_schema is not None
-                    and expected_schema.type.value != "number"
-                ):
-                    return False
-                state["mode"] = "number"
-                number_state = "after_minus"
-                return True
-            if char == "0":
-                if (
-                    expected_schema is not None
-                    and expected_schema.type.value != "number"
-                ):
-                    return False
-                state["mode"] = "number"
-                number_state = "int_zero"
-                return True
-            if "1" <= char <= "9":
-                if (
-                    expected_schema is not None
-                    and expected_schema.type.value != "number"
-                ):
-                    return False
-                state["mode"] = "number"
-                number_state = "int_digits"
-                return True
-            return False
 
         def is_response_object() -> bool:
             if not stack:
                 return False
             parent = stack[-1]
             return (
-                parent["type"] == "array"
-                and parent["role"] == "root_array"
-                and parent["state"] in {"expect_value_or_end", "expect_value"}
+                parent["type"] == FrameType.ARRAY
+                and parent["role"] == FrameRole.ROOT_ARRAY
+                and parent["state"] in {
+                    FrameState.EXPECT_VALUE_OR_END,
+                    FrameState.EXPECT_VALUE,
+                }
             )
 
         def expected_response_key(frame: JsonFrame) -> str | None:
-            if frame["role"] != "response":
+            if frame["role"] != FrameRole.RESPONSE:
                 return None
             if frame["key_index"] >= len(self.RESPONSE_KEYS):
                 return None
@@ -267,8 +323,8 @@ class JsonValidator(BaseModel):
                 return False
             frame = stack[-1]
             return (
-                frame["type"] == "object"
-                and frame["role"] == "response"
+                frame["type"] == FrameType.OBJECT
+                and frame["role"] == FrameRole.RESPONSE
                 and frame["current_key"] == "name"
             )
 
@@ -277,8 +333,8 @@ class JsonValidator(BaseModel):
                 return False
             frame = stack[-1]
             return (
-                frame["type"] == "object"
-                and frame["role"] == "response"
+                frame["type"] == FrameType.OBJECT
+                and frame["role"] == FrameRole.RESPONSE
                 and frame["current_key"] == "parameters"
             )
 
@@ -287,13 +343,16 @@ class JsonValidator(BaseModel):
                 return None
             frame = stack[-1]
             if (
-                frame["role"] == "schema_object"
-                and frame["state"] == "expect_value"
+                frame["role"] == FrameRole.SCHEMA_OBJECT
+                and frame["state"] == FrameState.EXPECT_VALUE
             ):
                 return frame["properties"].get(frame["current_key"])
             if (
-                frame["role"] == "schema_array"
-                and frame["state"] in {"expect_value_or_end", "expect_value"}
+                frame["role"] == FrameRole.SCHEMA_ARRAY
+                and frame["state"] in {
+                    FrameState.EXPECT_VALUE_OR_END,
+                    FrameState.EXPECT_VALUE,
+                }
             ):
                 return frame["items"]
             return None
@@ -307,7 +366,7 @@ class JsonValidator(BaseModel):
             )
 
         def expected_schema_key(frame: JsonFrame) -> str | None:
-            if frame["role"] != "schema_object":
+            if frame["role"] != FrameRole.SCHEMA_OBJECT:
                 return None
             candidates = [
                 key for key in frame["properties"]
@@ -319,7 +378,7 @@ class JsonValidator(BaseModel):
             return None
 
         def is_valid_schema_key_prefix(frame: JsonFrame, value: str) -> bool:
-            if frame["role"] != "schema_object":
+            if frame["role"] != FrameRole.SCHEMA_OBJECT:
                 return True
             return any(
                 key.startswith(value)
@@ -328,7 +387,7 @@ class JsonValidator(BaseModel):
             )
 
         def has_all_schema_keys(frame: JsonFrame) -> bool:
-            if frame["role"] != "schema_object":
+            if frame["role"] != FrameRole.SCHEMA_OBJECT:
                 return True
             return frame["seen_keys"] == set(frame["properties"])
 
@@ -337,19 +396,25 @@ class JsonValidator(BaseModel):
                 return False
             frame = stack.pop()
             if (
-                frame["type"] == "array"
+                frame["type"] == FrameType.ARRAY
                 and char == "]"
-                and frame["state"] in {"expect_value_or_end", "after_value"}
+                and frame["state"] in {
+                    FrameState.EXPECT_VALUE_OR_END,
+                    FrameState.AFTER_VALUE,
+                }
             ):
                 value_finished()
                 return True
             if (
-                frame["type"] == "object"
+                frame["type"] == FrameType.OBJECT
                 and char == "}"
-                and frame["state"] in {"expect_key_or_end", "after_value"}
+                and frame["state"] in {
+                    FrameState.EXPECT_KEY_OR_END,
+                    FrameState.AFTER_VALUE,
+                }
                 and has_all_schema_keys(frame)
                 and (
-                    frame["role"] != "response"
+                    frame["role"] != FrameRole.RESPONSE
                     or frame["key_index"] == len(self.RESPONSE_KEYS)
                 )
             ):
@@ -367,226 +432,251 @@ class JsonValidator(BaseModel):
 
         def consume_number_char(char: str) -> bool:
             nonlocal number_state
-            if number_state == "after_minus":
-                if char == "0":
-                    number_state = "int_zero"
-                    return True
-                if "1" <= char <= "9":
-                    number_state = "int_digits"
-                    return True
-                return False
-            if number_state == "int_zero":
-                if char == ".":
-                    number_state = "frac_start"
-                    return True
-                if char in {"e", "E"}:
-                    number_state = "exp_start"
-                    return True
-                return False
-            if number_state == "int_digits":
-                if char.isdigit():
-                    return True
-                if char == ".":
-                    number_state = "frac_start"
-                    return True
-                if char in {"e", "E"}:
-                    number_state = "exp_start"
-                    return True
-                return False
-            if number_state == "frac_start":
-                if char.isdigit():
-                    number_state = "frac_digits"
-                    return True
-                return False
-            if number_state == "frac_digits":
-                if char.isdigit():
-                    return True
-                if char in {"e", "E"}:
-                    number_state = "exp_start"
-                    return True
-                return False
-            if number_state == "exp_start":
-                if char in {"+", "-"}:
-                    number_state = "exp_sign"
-                    return True
-                if char.isdigit():
-                    number_state = "exp_digits"
-                    return True
-                return False
-            if number_state == "exp_sign":
-                if char.isdigit():
-                    number_state = "exp_digits"
-                    return True
-                return False
-            if number_state == "exp_digits":
-                return char.isdigit()
-            return False
+            match number_state:
+                case "after_minus":
+                    if char == "0":
+                        number_state = "int_zero"
+                        return True
+                    if "1" <= char <= "9":
+                        number_state = "int_digits"
+                        return True
+                    return False
+                case "int_zero":
+                    if char == ".":
+                        number_state = "frac_start"
+                        return True
+                    if char in {"e", "E"}:
+                        number_state = "exp_start"
+                        return True
+                    return False
+                case "int_digits":
+                    if char.isdigit():
+                        return True
+                    if char == ".":
+                        number_state = "frac_start"
+                        return True
+                    if char in {"e", "E"}:
+                        number_state = "exp_start"
+                        return True
+                    return False
+                case "frac_start":
+                    if char.isdigit():
+                        number_state = "frac_digits"
+                        return True
+                    return False
+                case "frac_digits":
+                    if char.isdigit():
+                        return True
+                    if char in {"e", "E"}:
+                        number_state = "exp_start"
+                        return True
+                    return False
+                case "exp_start":
+                    if char in {"+", "-"}:
+                        number_state = "exp_sign"
+                        return True
+                    if char.isdigit():
+                        number_state = "exp_digits"
+                        return True
+                    return False
+                case "exp_sign":
+                    if char.isdigit():
+                        number_state = "exp_digits"
+                        return True
+                    return False
+                case "exp_digits":
+                    return char.isdigit()
+                case _:
+                    return False
 
         while index < len(text):
             char = text[index]
             mode = state["mode"]
 
-            if mode == "string":
-                if unicode_escape_count > 0:
-                    if not is_hex(char):
-                        return False
-                    unicode_escape_count -= 1
-                    escape = unicode_escape_count > 0
-                elif escape:
-                    if char == "u":
-                        unicode_escape_count = 4
-                    elif char not in {'"', "\\", "/", "b", "f", "n", "r", "t"}:
-                        return False
-                    escape = unicode_escape_count > 0
-                elif char == "\\":
-                    escape = True
-                elif char == '"':
-                    if string_kind == "key":
-                        frame = stack[-1]
-                        expected_key = expected_response_key(frame)
+            match mode:
+                case "string":
+                    if unicode_escape_count > 0:
+                        if not is_hex(char):
+                            return False
+                        unicode_escape_count -= 1
+                        escape = unicode_escape_count > 0
+                    elif escape:
+                        match char:
+                            case "u":
+                                unicode_escape_count = 4
+                            case (
+                                '"'
+                                | "\\"
+                                | "/"
+                                | "b"
+                                | "f"
+                                | "n"
+                                | "r"
+                                | "t"
+                            ):
+                                pass
+                            case _:
+                                return False
+                        escape = unicode_escape_count > 0
+                    elif char == "\\":
+                        escape = True
+                    elif char == '"':
+                        if string_kind == "key":
+                            frame = stack[-1]
+                            expected_key = expected_response_key(frame)
+                            if (
+                                expected_key is not None
+                                and key_buffer != expected_key
+                            ):
+                                return False
+                            if (
+                                frame["role"] == FrameRole.SCHEMA_OBJECT
+                                and expected_schema_key(frame) is None
+                            ):
+                                return False
+                            if frame["role"] == FrameRole.SCHEMA_OBJECT:
+                                frame["seen_keys"].add(key_buffer)
+                            frame["current_key"] = key_buffer
+                            stack[-1]["state"] = FrameState.AFTER_KEY
+                            state["mode"] = "normal"
+                        else:
+                            if (
+                                is_name_value()
+                                and self.function_names
+                                and value_buffer not in self.function_names
+                            ):
+                                return False
+                            if is_name_value():
+                                selected_function_name = value_buffer
+                            value_finished()
+                    elif string_kind == "key":
+                        key_buffer += char
+                        expected_key = expected_response_key(stack[-1])
                         if (
                             expected_key is not None
-                            and key_buffer != expected_key
+                            and not expected_key.startswith(key_buffer)
                         ):
                             return False
-                        if (
-                            frame["role"] == "schema_object"
-                            and expected_schema_key(frame) is None
+                        if not is_valid_schema_key_prefix(
+                            stack[-1],
+                            key_buffer,
                         ):
                             return False
-                        if frame["role"] == "schema_object":
-                            frame["seen_keys"].add(key_buffer)
-                        frame["current_key"] = key_buffer
-                        stack[-1]["state"] = "after_key"
-                        state["mode"] = "normal"
-                    else:
-                        if (
-                            is_name_value()
-                            and self.function_names
-                            and value_buffer not in self.function_names
-                        ):
+                    elif ord(char) < 0x20:
+                        return False
+                    elif is_name_value():
+                        value_buffer += char
+                        if not is_valid_function_name_prefix(value_buffer):
                             return False
-                        if is_name_value():
-                            selected_function_name = value_buffer
-                        value_finished()
-                elif string_kind == "key":
-                    key_buffer += char
-                    expected_key = expected_response_key(stack[-1])
-                    if (
-                        expected_key is not None
-                        and not expected_key.startswith(key_buffer)
-                    ):
-                        return False
-                    if not is_valid_schema_key_prefix(stack[-1], key_buffer):
-                        return False
-                elif ord(char) < 0x20:
-                    return False
-                elif is_name_value():
-                    value_buffer += char
-                    if not is_valid_function_name_prefix(value_buffer):
-                        return False
-                index += 1
-                continue
-
-            if mode == "literal":
-                if (
-                    literal_index >= len(literal)
-                    or char != literal[literal_index]
-                ):
-                    return False
-                literal_index += 1
-                if literal_index == len(literal):
-                    value_finished()
-                index += 1
-                continue
-
-            if mode == "number":
-                if consume_number_char(char):
                     index += 1
                     continue
-                if char.isspace() or char in {",", "]", "}"}:
-                    if not is_complete_number():
+
+                case "literal":
+                    if (
+                        literal_index >= len(literal)
+                        or char != literal[literal_index]
+                    ):
                         return False
-                    value_finished()
+                    literal_index += 1
+                    if literal_index == len(literal):
+                        value_finished()
+                    index += 1
                     continue
-                return False
+
+                case "number":
+                    if consume_number_char(char):
+                        index += 1
+                        continue
+                    if char.isspace() or char in {",", "]", "}"}:
+                        if not is_complete_number():
+                            return False
+                        value_finished()
+                        continue
+                    return False
 
             if char.isspace():
                 index += 1
                 continue
 
-            if mode == "start":
-                if char != "[" or not start_value(char):
+            match mode:
+                case "start":
+                    if char != "[" or not start_value(char):
+                        return False
+                    index += 1
+                    continue
+                case "after_end":
                     return False
-                index += 1
-                continue
-
-            if mode == "after_end":
-                return False
 
             if not stack:
                 return False
 
             frame = stack[-1]
-            if frame["type"] == "array":
-                if frame["state"] == "expect_value_or_end":
-                    if char == "]":
-                        if not finish_container(char):
+            match frame["type"]:
+                case FrameType.ARRAY:
+                    match frame["state"]:
+                        case FrameState.EXPECT_VALUE_OR_END:
+                            if char == "]":
+                                if not finish_container(char):
+                                    return False
+                            elif not start_value(char):
+                                return False
+                        case FrameState.EXPECT_VALUE:
+                            if not start_value(char):
+                                return False
+                        case FrameState.AFTER_VALUE:
+                            match char:
+                                case ",":
+                                    frame["state"] = FrameState.EXPECT_VALUE
+                                case "]":
+                                    if not finish_container(char):
+                                        return False
+                                case _:
+                                    return False
+                        case _:
                             return False
-                    elif not start_value(char):
-                        return False
-                elif frame["state"] == "expect_value":
-                    if not start_value(char):
-                        return False
-                elif frame["state"] == "after_value":
-                    if char == ",":
-                        frame["state"] = "expect_value"
-                    elif char == "]":
-                        if not finish_container(char):
+                case _:
+                    match frame["state"]:
+                        case FrameState.EXPECT_KEY_OR_END:
+                            match char:
+                                case "}":
+                                    if not finish_container(char):
+                                        return False
+                                case '"':
+                                    state["mode"] = "string"
+                                    string_kind = "key"
+                                    key_buffer = ""
+                                case _:
+                                    return False
+                        case FrameState.EXPECT_KEY:
+                            if char != '"':
+                                return False
+                            state["mode"] = "string"
+                            string_kind = "key"
+                            key_buffer = ""
+                        case FrameState.AFTER_KEY:
+                            if char != ":":
+                                return False
+                            frame["state"] = FrameState.EXPECT_VALUE
+                        case FrameState.EXPECT_VALUE:
+                            if not start_value(char):
+                                return False
+                        case FrameState.AFTER_VALUE:
+                            match char:
+                                case ",":
+                                    if (
+                                        frame["role"] == FrameRole.RESPONSE
+                                        and frame["key_index"]
+                                        >= len(self.RESPONSE_KEYS)
+                                    ):
+                                        return False
+                                    frame["state"] = FrameState.EXPECT_KEY
+                                case "}":
+                                    if not finish_container(char):
+                                        return False
+                                case _:
+                                    return False
+                        case _:
                             return False
-                    else:
-                        return False
-                else:
-                    return False
-            else:
-                if frame["state"] == "expect_key_or_end":
-                    if char == "}":
-                        if not finish_container(char):
-                            return False
-                    elif char == '"':
-                        state["mode"] = "string"
-                        string_kind = "key"
-                        key_buffer = ""
-                    else:
-                        return False
-                elif frame["state"] == "expect_key":
-                    if char != '"':
-                        return False
-                    state["mode"] = "string"
-                    string_kind = "key"
-                    key_buffer = ""
-                elif frame["state"] == "after_key":
-                    if char != ":":
-                        return False
-                    frame["state"] = "expect_value"
-                elif frame["state"] == "expect_value":
-                    if not start_value(char):
-                        return False
-                elif frame["state"] == "after_value":
-                    if char == ",":
-                        if (
-                            frame["role"] == "response"
-                            and frame["key_index"] >= len(self.RESPONSE_KEYS)
-                        ):
-                            return False
-                        frame["state"] = "expect_key"
-                    elif char == "}":
-                        if not finish_container(char):
-                            return False
-                    else:
-                        return False
-                else:
-                    return False
 
             index += 1
 
