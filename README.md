@@ -197,6 +197,73 @@ The validator currently enforces:
 This approach improves reliability with a small model by preventing invalid
 tokens from entering the generated JSON in the first place.
 
+### JsonValidator Flowchart
+
+```mermaid
+flowchart TD
+    A[Candidate token text] --> B[is_valid_string]
+    B --> C[Append candidate to current text]
+    C --> D[_is_valid_json_prefix]
+    D --> E{Read next character}
+
+    E -->|whitespace| E
+    E -->|start mode| F{First value starts with object?}
+    F -->|yes| G[Push response object frame]
+    F -->|no| X[Reject candidate]
+
+    E -->|string mode| H{Inside key or value?}
+    H -->|key| I[Build key buffer]
+    I --> J{Expected response key or schema key prefix?}
+    J -->|yes| K[Store current key]
+    J -->|no| X
+    H -->|value| L[Build value buffer]
+    L --> M{Name value matches function-name prefix?}
+    M -->|yes| N[Finish string value]
+    M -->|no| X
+
+    E -->|literal mode| O{Matches true, false, or null?}
+    O -->|complete| P[Finish literal value]
+    O -->|still prefix| E
+    O -->|no| X
+
+    E -->|number mode| Q{Valid number state?}
+    Q -->|digit/sign/dot/exponent| E
+    Q -->|complete before delimiter| R[Finish number value]
+    Q -->|no| X
+
+    E -->|normal mode| S{Top stack frame}
+    S -->|object expects key| T{Key string or valid close?}
+    S -->|object expects colon| U{Character is ':'?}
+    S -->|object expects value| V[Start value by schema type]
+    S -->|object after value| W{Comma or valid close?}
+    S -->|array expects value| Y[Start value by item schema]
+    S -->|array after value| Z{Comma or valid close?}
+
+    T -->|ok| E
+    T -->|no| X
+    U -->|yes| E
+    U -->|no| X
+    V -->|ok| E
+    V -->|no| X
+    W -->|ok| E
+    W -->|no| X
+    Y -->|ok| E
+    Y -->|no| X
+    Z -->|ok| E
+    Z -->|no| X
+
+    G --> E
+    K --> E
+    N --> AA[Update frame state]
+    P --> AA
+    R --> AA
+    AA --> E
+
+    E -->|end of candidate text| AB[Accept prefix]
+    AB --> AC[Commit candidate to validator text]
+    X --> AD[Reject candidate and keep previous text]
+```
+
 ## Design Decisions
 
 - **Pydantic models for validation**: input prompts, function definitions, CLI

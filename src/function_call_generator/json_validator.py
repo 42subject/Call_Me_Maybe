@@ -4,7 +4,7 @@ from typing import ClassVar, TypedDict
 
 from pydantic import BaseModel, Field
 
-from ..input_models import FunctionParametersModel
+from ..input_models import FunctionParametersModel, ParameterType
 
 
 class FrameType(str, Enum):
@@ -34,7 +34,6 @@ class FrameRole(str, Enum):
     JSON prefix validation中のコンテナの役割を表す
     """
 
-    ROOT_ARRAY = "root_array"
     RESPONSE = "response"
     SCHEMA_OBJECT = "schema_object"
     SCHEMA_ARRAY = "schema_array"
@@ -173,7 +172,7 @@ class JsonValidator(BaseModel):
                 case '"':
                     if (
                         expected_schema is not None
-                        and expected_schema.type.value != "string"
+                        and expected_schema.type != ParameterType.STR
                     ):
                         return False
                     state["mode"] = "string"
@@ -195,7 +194,7 @@ class JsonValidator(BaseModel):
                             )
                         )
                     elif expected_schema is not None:
-                        if expected_schema.type.value != "object":
+                        if expected_schema.type != ParameterType.OBJECT:
                             return False
                         stack.append(
                             build_frame(
@@ -208,7 +207,7 @@ class JsonValidator(BaseModel):
                     else:
                         role = (
                             FrameRole.RESPONSE
-                            if is_response_object()
+                            if not stack
                             else FrameRole.NORMAL
                         )
                         stack.append(
@@ -222,7 +221,7 @@ class JsonValidator(BaseModel):
                     return True
                 case "[":
                     if expected_schema is not None:
-                        if expected_schema.type.value != "array":
+                        if expected_schema.type != ParameterType.ARRAY:
                             return False
                         stack.append(
                             build_frame(
@@ -233,36 +232,40 @@ class JsonValidator(BaseModel):
                             )
                         )
                     else:
-                        role = (
-                            FrameRole.ROOT_ARRAY
-                            if not stack
-                            else FrameRole.NORMAL
-                        )
                         stack.append(
                             build_frame(
                                 FrameType.ARRAY,
                                 FrameState.EXPECT_VALUE_OR_END,
-                                role,
+                                FrameRole.NORMAL,
                             )
                         )
                     state["mode"] = "normal"
                     return True
                 case "t":
-                    if expected_schema is not None:
+                    if (
+                        expected_schema is not None
+                        and expected_schema.type != ParameterType.BOOLEAN
+                    ):
                         return False
                     state["mode"] = "literal"
                     literal = "true"
                     literal_index = 1
                     return True
                 case "f":
-                    if expected_schema is not None:
+                    if (
+                        expected_schema is not None
+                        and expected_schema.type != ParameterType.BOOLEAN
+                    ):
                         return False
                     state["mode"] = "literal"
                     literal = "false"
                     literal_index = 1
                     return True
                 case "n":
-                    if expected_schema is not None:
+                    if (
+                        expected_schema is not None
+                        and expected_schema.type != ParameterType.NULL
+                    ):
                         return False
                     state["mode"] = "literal"
                     literal = "null"
@@ -271,7 +274,8 @@ class JsonValidator(BaseModel):
                 case "-":
                     if (
                         expected_schema is not None
-                        and expected_schema.type.value != "number"
+                        and expected_schema.type
+                        not in {ParameterType.NUMBER, ParameterType.INTEGER}
                     ):
                         return False
                     state["mode"] = "number"
@@ -280,7 +284,8 @@ class JsonValidator(BaseModel):
                 case "0":
                     if (
                         expected_schema is not None
-                        and expected_schema.type.value != "number"
+                        and expected_schema.type
+                        not in {ParameterType.NUMBER, ParameterType.INTEGER}
                     ):
                         return False
                     state["mode"] = "number"
@@ -289,7 +294,8 @@ class JsonValidator(BaseModel):
                 case _ if "1" <= char <= "9":
                     if (
                         expected_schema is not None
-                        and expected_schema.type.value != "number"
+                        and expected_schema.type
+                        not in {ParameterType.NUMBER, ParameterType.INTEGER}
                     ):
                         return False
                     state["mode"] = "number"
@@ -297,19 +303,6 @@ class JsonValidator(BaseModel):
                     return True
                 case _:
                     return False
-
-        def is_response_object() -> bool:
-            if not stack:
-                return False
-            parent = stack[-1]
-            return (
-                parent["type"] == FrameType.ARRAY
-                and parent["role"] == FrameRole.ROOT_ARRAY
-                and parent["state"] in {
-                    FrameState.EXPECT_VALUE_OR_END,
-                    FrameState.EXPECT_VALUE,
-                }
-            )
 
         def expected_response_key(frame: JsonFrame) -> str | None:
             if frame["role"] != FrameRole.RESPONSE:
@@ -423,12 +416,24 @@ class JsonValidator(BaseModel):
             return False
 
         def is_complete_number() -> bool:
+            if is_integer_value():
+                return number_state in {
+                    "int_zero",
+                    "int_digits",
+                }
             return number_state in {
                 "int_zero",
                 "int_digits",
                 "frac_digits",
                 "exp_digits",
             }
+
+        def is_integer_value() -> bool:
+            expected_schema = get_expected_schema()
+            return (
+                expected_schema is not None
+                and expected_schema.type == ParameterType.INTEGER
+            )
 
         def consume_number_char(char: str) -> bool:
             nonlocal number_state
@@ -442,6 +447,8 @@ class JsonValidator(BaseModel):
                         return True
                     return False
                 case "int_zero":
+                    if is_integer_value():
+                        return False
                     if char == ".":
                         number_state = "frac_start"
                         return True
@@ -452,6 +459,8 @@ class JsonValidator(BaseModel):
                 case "int_digits":
                     if char.isdigit():
                         return True
+                    if is_integer_value():
+                        return False
                     if char == ".":
                         number_state = "frac_start"
                         return True
@@ -600,7 +609,7 @@ class JsonValidator(BaseModel):
 
             match mode:
                 case "start":
-                    if char != "[" or not start_value(char):
+                    if char != "{" or not start_value(char):
                         return False
                     index += 1
                     continue

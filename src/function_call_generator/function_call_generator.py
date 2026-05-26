@@ -2,7 +2,7 @@ from math import inf
 from typing import ClassVar
 
 from llm_sdk import Small_LLM_Model
-from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from ..input_models import PromptModel, FunctionModel
 
@@ -245,21 +245,39 @@ class QwenClient(LLMClient):
         Returns:
             list[ResponseModel]: 生成された関数呼び出し結果
         """
-        adapter = TypeAdapter(list[ResponseModel])
+        return [self._generate_one(prompt) for prompt in prompts]
+
+    def _generate_one(self, prompt: PromptModel) -> ResponseModel:
+        """
+        1つのプロンプトを関数呼び出し結果に変換する
+
+        Args:
+            prompt: 関数呼び出しに変換するプロンプト
+
+        Raises:
+            ValueError: 最大リトライ回数までに有効な応答を生成できない時
+
+        Returns:
+            ResponseModel: 生成された関数呼び出し結果
+        """
         feedbacks: list[str] = []
 
         for retry in range(self.MAX_RETRIES):
             self.validator.reset()
-            prompt_text: str = self.prompt_builder.build(prompts, feedbacks)
+            prompt_text: str = self.prompt_builder.build([prompt], feedbacks)
             input_ids = self.tokenizer.encode(prompt_text)
             response_text = self._generate_response(input_ids)
 
             try:
-                response_models: list[ResponseModel] = adapter.validate_json(
-                    response_text
+                response_model: ResponseModel = (
+                    ResponseModel.model_validate_json(response_text)
                 )
-                return response_models
-            except ValidationError as error:
+                if response_model.prompt != prompt.prompt:
+                    raise ValueError(
+                        "response prompt must match the original prompt"
+                    )
+                return response_model
+            except (ValidationError, ValueError) as error:
                 print(
                     f"response validation failed. "
                     f"({retry + 1}/{self.MAX_RETRIES})\n"

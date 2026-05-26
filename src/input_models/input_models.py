@@ -1,4 +1,4 @@
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, model_validator, ConfigDict
 
 from enum import Enum
 from typing import Optional
@@ -8,6 +8,8 @@ class PromptModel(BaseModel):
     """
     入力プロンプトを表す
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     prompt: str
 
@@ -19,14 +21,19 @@ class ParameterType(str, Enum):
 
     STR = "string"
     NUMBER = "number"
+    INTEGER = "integer"
+    BOOLEAN = "boolean"
     OBJECT = "object"
     ARRAY = "array"
+    NULL = "null"
 
 
 class FunctionParametersModel(BaseModel):
     """
     関数の引数または戻り値の型定義を表す
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     type: ParameterType
     properties: Optional[dict[str, "FunctionParametersModel"]] = None
@@ -65,6 +72,8 @@ class FunctionModel(BaseModel):
     """
     LLMが呼び出し候補として利用する関数定義を表す
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     name: str
     description: str
