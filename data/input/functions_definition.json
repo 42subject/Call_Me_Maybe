@@ -131,5 +131,47 @@
         }
       }
     }
+  },
+  {
+    "name": "fn_register_email",
+    "description": "Register a user's email address with simple notification preferences.",
+    "parameters": {
+      "user": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "preferences": {
+            "type": "object",
+            "properties": {
+              "newsletter": {
+                "type": "boolean"
+              },
+              "topics": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "returns": {
+      "type": "object",
+      "properties": {
+        "registered": {
+          "type": "boolean"
+        },
+        "email": {
+          "type": "string"
+        }
+      }
+    }
   }
 ]

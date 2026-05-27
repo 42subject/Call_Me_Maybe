@@ -72,10 +72,11 @@ Custom paths can be provided independently:
 uv run python -m src \
   --functions_definition data/input/functions_definition.json \
   --input data/input/function_calling_tests.json \
-  --output data/output/function_calling_results.json
+  --output data/output/function_calling_results.json \
+  --model Qwen/Qwen3-0.6B
 ```
 
-Each option is optional. If an option is omitted, its default path is used.
+Each option is optional. If `--model` is omitted, `Qwen/Qwen3-0.6B` is used.
 
 ### Makefile
 

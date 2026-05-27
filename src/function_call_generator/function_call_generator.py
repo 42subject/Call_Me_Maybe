@@ -261,6 +261,7 @@ class QwenClient(LLMClient):
             ResponseModel: 生成された関数呼び出し結果
         """
         feedbacks: list[str] = []
+        self.visualizer.initialize()
 
         for retry in range(self.MAX_RETRIES):
             self.validator.reset()
@@ -276,6 +277,7 @@ class QwenClient(LLMClient):
                     raise ValueError(
                         "response prompt must match the original prompt"
                     )
+                print(f"Answer: \n{response_model.model_dump_json()}")
                 return response_model
             except (ValidationError, ValueError) as error:
                 print(
@@ -285,7 +287,6 @@ class QwenClient(LLMClient):
                     f"check MAX_TOKENS ({self.MAX_TOKENS}).\n"
                     f"response: {response_text}"
                 )
-                self.visualizer.reset()
                 feedback = str(error)
                 if feedback not in feedbacks:
                     feedbacks.append(feedback)

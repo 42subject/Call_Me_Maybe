@@ -17,22 +17,12 @@ class Visualizer(BaseModel):
     TOP_TOKEN_LIMIT: ClassVar[int] = 5
 
     tokenizer: Tokenizer
-    is_initialized: bool = False
 
     def initialize(self) -> None:
         """
         表示用の行を確保する
         """
-        if self.is_initialized:
-            return
-        print("\n" * self.TOTAL_LINES, end="")
-        self.is_initialized = True
-
-    def reset(self) -> None:
-        """
-        次の生成で新しい表示ブロックを作るように状態をリセットする
-        """
-        self.is_initialized = False
+        print("\n" * (self.TOTAL_LINES + 1), end="")
 
     def show_generated_text(self, generated_text: str) -> None:
         """
@@ -92,7 +82,6 @@ class Visualizer(BaseModel):
             line_index: 表示ブロック内の行番号
             text: 表示する文字列
         """
-        self.initialize()
         move_up_count = self.TOTAL_LINES - line_index
         print(f"\033[{move_up_count}F", end="")
         print(f"\033[K{text}", end="")

@@ -4,7 +4,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from .paths import FUNCTIONS_DEFINITION, INPUT, OUTPUT
+from .config import FUNCTIONS_DEFINITION, INPUT, OUTPUT, MODEL
 from .function_call_generator import QwenClient
 from .json_io import JsonIO
 
@@ -19,6 +19,7 @@ class ArgvModel(BaseModel):
     functions_definition: Path
     input: Path
     output: Path
+    model: str
 
     @classmethod
     def parse_argv(cls, argv: list[str]) -> "ArgvModel":
@@ -42,6 +43,7 @@ class ArgvModel(BaseModel):
             "functions_definition": FUNCTIONS_DEFINITION,
             "input": INPUT,
             "output": OUTPUT,
+            "model": MODEL,
         }
         specified_keys: set[str] = set()
         for key, value in zip(argv[1::2], argv[2::2]):
@@ -83,10 +85,10 @@ def main() -> None:
         return
 
     try:
-        qwen_client = QwenClient("Qwen/Qwen3-0.6B", functions)
+        qwen_client = QwenClient(paths.model, functions)
         response = qwen_client.generate(prompts)
-    except ValueError as error:
-        print(f"Error: {error}")
+    except (OSError, RuntimeError, ValueError) as error:
+        print(f"Error: failed to generate responses: {error}")
         return
 
     try:
