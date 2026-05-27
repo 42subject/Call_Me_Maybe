@@ -2,19 +2,25 @@
 
 # Call Me Maybe
 
-## Description
+## Overview
 
-Call Me Maybe is a function-calling pipeline for a small local LLM. It reads
-natural-language prompts and function definitions, then produces structured
-JSON function-call objects instead of free-form answers.
+Call Me Maybe is a function-calling system for a small local LLM. It reads
+natural-language requests and available function definitions, then writes a
+machine-readable JSON file describing which function should be called and which
+arguments should be passed.
 
-For example, given a prompt such as:
+The subject focuses on making a small model produce reliable structured output.
+This implementation uses the provided `llm_sdk.Small_LLM_Model` wrapper with
+`Qwen/Qwen3-0.6B` by default, and applies schema-aware constrained decoding so
+invalid JSON or invalid function arguments are rejected during generation.
+
+Example request:
 
 ```text
 What is the sum of 2 and 3?
 ```
 
-the program should output the function to call and the arguments to pass:
+Example generated function call:
 
 ```json
 {
@@ -27,19 +33,22 @@ the program should output the function to call and the arguments to pass:
 }
 ```
 
-The project uses `Qwen/Qwen3-0.6B` through the provided `llm_sdk` package and
-implements constrained decoding so that generated tokens stay compatible with
-the expected JSON structure and the available function schemas.
-
-## Instructions
-
-### Requirements
+## Requirements
 
 - Python 3.10 or later
 - `uv`
 - The provided `llm_sdk` package
+- `flake8` and `mypy` checks through the Makefile
 
-### Installation
+Project-specific constraints from the subject:
+
+- The program must run with `uv run python -m src`.
+- Classes use Pydantic models for validation.
+- File, JSON, CLI, model-loading, and generation errors are handled gracefully.
+- The output must be valid JSON and must follow the required schema exactly.
+- The decoder must constrain generation, not only rely on prompting.
+
+## Installation
 
 ```bash
 make install
@@ -51,22 +60,24 @@ This runs:
 uv sync
 ```
 
-### Run
+## Usage
+
+Run with default paths:
 
 ```bash
 uv run python -m src
 ```
 
-By default, the program reads:
+Default input files:
 
 - `data/input/functions_definition.json`
 - `data/input/function_calling_tests.json`
 
-and writes:
+Default output file:
 
 - `data/output/function_calling_results.json`
 
-Custom paths can be provided independently:
+All CLI options are optional:
 
 ```bash
 uv run python -m src \
@@ -76,9 +87,9 @@ uv run python -m src \
   --model Qwen/Qwen3-0.6B
 ```
 
-Each option is optional. If `--model` is omitted, `Qwen/Qwen3-0.6B` is used.
+If `--model` is omitted, `Qwen/Qwen3-0.6B` is used.
 
-### Makefile
+## Makefile
 
 ```bash
 make install
@@ -89,11 +100,16 @@ make lint
 make lint-strict
 ```
 
-`make lint` runs `flake8` and `mypy` with the required project flags.
+- `make run` runs the program with the default project input and output paths.
+- `make lint` runs `flake8` and `mypy` with the subject flags.
+- `make lint-strict` runs `make lint` and then `mypy --strict`.
 
-## Input Format
+## Input Files
 
-The prompt file must be a JSON array of objects with a `prompt` field:
+### Prompt File
+
+`function_calling_tests.json` must be a JSON array. Each item contains one
+natural-language request:
 
 ```json
 [
@@ -103,8 +119,17 @@ The prompt file must be a JSON array of objects with a `prompt` field:
 ]
 ```
 
-The function definition file must be a JSON array. Each function has a name,
-description, parameter schema, and return schema:
+### Function Definition File
+
+`functions_definition.json` must be a JSON array. Each function definition
+contains:
+
+- `name`: function name
+- `description`: natural-language description
+- `parameters`: argument names and schemas
+- `returns`: return schema
+
+Example:
 
 ```json
 [
@@ -126,22 +151,30 @@ description, parameter schema, and return schema:
 ]
 ```
 
-Supported parameter types are:
+Supported schema types:
 
 - `string`
 - `number`
+- `integer`
+- `boolean`
 - `object`
 - `array`
+- `null`
 
-Objects use nested `properties`, and arrays use `items`.
+Objects define nested fields with `properties`. Arrays define their element
+schema with `items`.
 
-## Output Format
+## Output File Format
 
-The output file is a JSON array. Each element contains exactly:
+The program writes a single JSON file to
+`data/output/function_calling_results.json` by default. The file is a JSON
+array with one object per input prompt.
 
-- `prompt`: the original prompt text
+Each output object contains exactly these keys:
+
+- `prompt`: the original natural-language request
 - `name`: the selected function name
-- `parameters`: the generated arguments for that function
+- `parameters`: all required function arguments with the correct types
 
 Example:
 
@@ -158,157 +191,186 @@ Example:
 ]
 ```
 
-The output directory is created automatically when needed.
+The output directory is created automatically if it does not already exist.
 
-## Algorithm
+## LLM SDK Usage
 
-The generation loop works token by token:
+The project uses the provided `Small_LLM_Model` wrapper from `llm_sdk`.
 
-1. `PromptBuilder` serializes the available functions and user prompts into a
-   single instruction prompt.
+The generation path uses:
+
+- `encode(text)`: convert the prompt into token IDs
+- `get_logits_from_input_ids(input_ids)`: get raw logits for the next token
+- `decode(token_ids)`: convert candidate token IDs back into text
+
+`QwenClient` owns the model, tokenizer adapter, prompt builder, JSON validator,
+and terminal visualizer.
+
+## Generation Pipeline
+
+Generation runs token by token:
+
+1. `PromptBuilder` serializes function definitions and the current user prompt
+   into an instruction prompt.
 2. `QwenTokenizer` encodes the prompt with the SDK tokenizer.
-3. `QwenClient` calls `Small_LLM_Model.get_logits_from_input_ids()`.
-4. The highest-scoring token is selected only if appending it keeps the output
-   valid according to `JsonValidator`.
-5. Invalid tokens are rejected by setting their logits to negative infinity.
-6. The selected token is appended to the input token list.
-7. Generation stops when the validator confirms that the JSON is complete.
-8. Pydantic validates the final JSON into `ResponseModel` objects before
-   writing the output file.
+3. `Small_LLM_Model.get_logits_from_input_ids()` returns next-token logits.
+4. Candidate tokens are decoded back to text.
+5. `JsonValidator` checks whether appending the candidate keeps the generated
+   text valid as a JSON prefix and valid against the selected function schema.
+6. Invalid candidates are rejected by setting their logits to negative infinity.
+7. The best remaining valid token is appended.
+8. The loop stops when the validator confirms the response is complete JSON.
+9. `ResponseModel` validates the final object before it is written to disk.
 
-### Constrained Decoding
+## Constrained Decoding
 
-The constrained decoder does not rely only on prompting. During generation,
-`JsonValidator` checks each candidate token as a JSON prefix and rejects tokens
-that would violate the required structure.
+The decoder does not rely only on prompt instructions. It filters tokens before
+selection.
 
-The validator currently enforces:
+`JsonValidator` enforces:
 
-- The root output must be a JSON array.
-- Each response object must contain `prompt`, `name`, and `parameters` in that
-  order.
-- `name` must be one of the names from `functions_definition.json`.
-- `parameters` must match the parameter schema of the selected `name`.
-- Unknown argument keys are rejected.
-- Missing required argument keys prevent an object from closing.
-- Argument value starts are constrained by type: string, number, object, or
-  array.
+- The generated response is a JSON object.
+- Response keys appear as `prompt`, `name`, and `parameters`.
+- `name` must match a function from `functions_definition.json`.
+- `parameters` must match the schema for the selected function.
+- Unknown parameter keys are rejected.
+- Object values cannot close until all required schema keys are present.
+- Value starts are constrained by type.
 - Nested object and array schemas are validated recursively.
+- Strings, numbers, literals, arrays, and objects are checked as JSON prefixes.
 
-This approach improves reliability with a small model by preventing invalid
-tokens from entering the generated JSON in the first place.
+This improves reliability with a small model by preventing invalid tokens from
+entering the output.
 
-### JsonValidator Flowchart
+## JsonValidator Flowchart
 
 ```mermaid
 flowchart TD
     A[Candidate token text] --> B[is_valid_string]
-    B --> C[Append candidate to current text]
-    C --> D[_is_valid_json_prefix]
-    D --> E{Read next character}
+    B --> C[next_text = current text + candidate]
+    C --> D[_is_valid_json_prefix next_text]
+    D --> E[Initialize stack, mode, buffers, literal state, number state]
+    E --> F{Read next character}
 
-    E -->|whitespace| E
-    E -->|start mode| F{First value starts with object?}
-    F -->|yes| G[Push response object frame]
-    F -->|no| X[Reject candidate]
+    F -->|whitespace| F
+    F -->|start mode| G{Starts with object?}
+    G -->|yes| H[Push response object frame]
+    G -->|no| X[Reject candidate]
 
-    E -->|string mode| H{Inside key or value?}
-    H -->|key| I[Build key buffer]
-    I --> J{Expected response key or schema key prefix?}
-    J -->|yes| K[Store current key]
-    J -->|no| X
-    H -->|value| L[Build value buffer]
-    L --> M{Name value matches function-name prefix?}
-    M -->|yes| N[Finish string value]
-    M -->|no| X
+    F -->|string mode| I{Key or value string?}
+    I -->|key| J[Update key buffer]
+    J --> K{Expected response key or schema key prefix?}
+    K -->|yes| L[Store current key]
+    K -->|no| X
+    I -->|value| M[Update value buffer]
+    M --> N{Name value matches function name prefix?}
+    N -->|yes| O[Finish string value]
+    N -->|no| X
 
-    E -->|literal mode| O{Matches true, false, or null?}
-    O -->|complete| P[Finish literal value]
-    O -->|still prefix| E
-    O -->|no| X
+    F -->|literal mode| P{Matches true, false, or null?}
+    P -->|complete| Q[Finish literal value]
+    P -->|still prefix| F
+    P -->|no| X
 
-    E -->|number mode| Q{Valid number state?}
-    Q -->|digit/sign/dot/exponent| E
-    Q -->|complete before delimiter| R[Finish number value]
-    Q -->|no| X
+    F -->|number mode| R{Valid number state?}
+    R -->|consume number char| F
+    R -->|complete before delimiter| S[Finish number value]
+    R -->|no| X
 
-    E -->|normal mode| S{Top stack frame}
-    S -->|object expects key| T{Key string or valid close?}
-    S -->|object expects colon| U{Character is ':'?}
-    S -->|object expects value| V[Start value by schema type]
-    S -->|object after value| W{Comma or valid close?}
-    S -->|array expects value| Y[Start value by item schema]
-    S -->|array after value| Z{Comma or valid close?}
+    F -->|normal mode| T{Top stack frame}
+    T -->|object expects key| U{Key string or valid close?}
+    T -->|object expects colon| V{Character is ':'?}
+    T -->|object expects value| W[Start value by schema type]
+    T -->|object after value| Y{Comma or valid close?}
+    T -->|array expects value| Z[Start value by item schema]
+    T -->|array after value| ZA{Comma or valid close?}
 
-    T -->|ok| E
-    T -->|no| X
-    U -->|yes| E
+    U -->|ok| F
     U -->|no| X
-    V -->|ok| E
+    V -->|yes| F
     V -->|no| X
-    W -->|ok| E
+    W -->|ok| F
     W -->|no| X
-    Y -->|ok| E
+    Y -->|ok| F
     Y -->|no| X
-    Z -->|ok| E
+    Z -->|ok| F
     Z -->|no| X
+    ZA -->|ok| F
+    ZA -->|no| X
 
-    G --> E
-    K --> E
-    N --> AA[Update frame state]
-    P --> AA
-    R --> AA
-    AA --> E
+    H --> F
+    L --> F
+    O --> AB[Update frame state]
+    Q --> AB
+    S --> AB
+    AB --> F
 
-    E -->|end of candidate text| AB[Accept prefix]
-    AB --> AC[Commit candidate to validator text]
-    X --> AD[Reject candidate and keep previous text]
+    F -->|end of next_text| AC[Accept prefix]
+    AC --> AD[Commit candidate to validator text]
+    X --> AE[Keep previous validator text]
 ```
 
-## Design Decisions
+## Validation Rules
 
-- **Pydantic models for validation**: input prompts, function definitions, CLI
-  arguments, and output responses are represented with Pydantic models.
-- **Explicit CLI parsing**: `src/__main__.py` accepts the required optional
-  arguments while rejecting unknown and duplicate options.
-- **Schema-aware constrained decoding**: the decoder uses function definitions
-  to restrict `name` and `parameters` during generation.
-- **Retry loop**: if the generated JSON parses but fails response validation,
-  the error is fed back into the prompt and generation is retried.
-- **Output safety**: output directories are created automatically, and file and
-  JSON errors are reported without crashing.
-- **Terminal visualization**: generation progress, rejected tokens, and top
-  candidate tokens are displayed while decoding.
+The final output is validated in two stages:
 
-## Performance Analysis
+- During generation, `JsonValidator` blocks structurally invalid JSON and
+  schema-incompatible function arguments.
+- After generation, `ResponseModel` forbids extra output keys and verifies that
+  the response object has the expected fields.
 
-The implementation targets the project requirements:
+The generated `prompt` must also match the original input prompt exactly.
 
-- **JSON validity**: constrained decoding is designed to keep every generated
-  response parseable as JSON.
-- **Schema reliability**: function names and argument schemas are constrained
-  during token selection.
-- **Accuracy**: function selection and argument extraction still depend on the
-  small LLM's understanding of the prompt, but invalid function names and
-  incompatible argument structures are blocked.
-- **Speed**: generation is token-by-token and can be slower than unconstrained
-  decoding, but the default input size is intended to complete within the
-  project time limit.
+## Error Handling
 
-## Challenges Faced
+The CLI catches and reports:
 
-- **Small-model JSON instability**: the model can produce malformed or partial
-  JSON without constraints. This was addressed with prefix validation during
-  decoding.
-- **Function-aware validation**: `parameters` cannot be validated correctly until
-  `name` is known. The validator stores the selected function name and then
-  switches to that function's parameter schema.
-- **Nested schemas**: object and array arguments require recursive validation.
-  The validator tracks schema frames for nested objects and arrays.
-- **Terminal output state**: repeated generation attempts can disturb cursor
-  positioning. The visualizer resets its display block between retries.
+- invalid CLI arguments
+- duplicate CLI options
+- missing files
+- directories passed as files
+- permission errors
+- malformed JSON
+- invalid input schemas
+- invalid model identifiers or model-loading failures
+- failed response generation after retries
+- output write errors
 
-## Testing Strategy
+Errors are printed as `Error: ...` messages instead of uncaught tracebacks.
+
+## Performance And Reliability
+
+The implementation targets the subject goals:
+
+- 100% parseable JSON output
+- schema-compliant function arguments
+- high function-selection and argument-extraction accuracy on the provided
+  prompts
+- completion within the project time limit for the default input size
+- robust behavior for missing files, malformed JSON, and invalid model names
+
+The current decoder prioritizes correctness over raw speed because each token
+candidate is checked before it is accepted.
+
+## Implemented Bonus Features
+
+- **Multiple model support**: `--model` can select a Hugging Face model ID.
+- **Advanced error recovery**: invalid generated responses are fed back into a
+  retry loop.
+- **Generation visualization**: generated text, rejected tokens, and top token
+  candidates are displayed during decoding.
+- **Complex nested arguments**: object and array schemas are validated
+  recursively.
+- **Encoding/decoding integration**: token IDs are decoded for prefix validation
+  and accepted tokens are appended back into the model input.
+
+Not implemented:
+
+- custom tokenizer reimplementation
+- batching
+- a comprehensive automated test suite
+
+## Testing
 
 Static checks:
 
@@ -317,18 +379,17 @@ make lint
 make lint-strict
 ```
 
-Manual runtime checks:
+Manual checks:
 
-- Run the full pipeline with the default input files.
-- Validate that `data/output/function_calling_results.json` is valid JSON.
+- Run `uv run python -m src`.
+- Confirm `data/output/function_calling_results.json` is valid JSON.
+- Confirm every object contains exactly `prompt`, `name`, and `parameters`.
 - Try missing input files.
 - Try malformed JSON input files.
-- Try custom `--input`, `--output`, and `--functions_definition` paths.
-- Check that unknown CLI options and duplicate options fail gracefully.
-- Check that output directories are created automatically.
-- Check that extra output keys are rejected by `ResponseModel`.
-- Check that invalid function names and invalid argument schemas are rejected
-  by constrained decoding.
+- Try unknown and duplicate CLI options.
+- Try custom `--functions_definition`, `--input`, and `--output` paths.
+- Try an invalid `--model` value and confirm it fails gracefully.
+- Confirm nested object and array parameter schemas are accepted.
 
 ## Project Structure
 
@@ -349,7 +410,7 @@ src/
 
 Key files:
 
-- `src/__main__.py`: CLI entry point and top-level error handling
+- `src/__main__.py`: CLI parsing and top-level error handling
 - `src/json_io.py`: JSON input loading and output writing
 - `src/input_models/input_models.py`: prompt and function definition models
 - `src/function_call_generator/function_call_generator.py`: prompt building,
@@ -359,35 +420,6 @@ Key files:
 - `src/function_call_generator/response_model.py`: output response model
 - `src/function_call_generator/visualizer.py`: terminal generation display
 
-## Example Usage
-
-Install dependencies:
-
-```bash
-make install
-```
-
-Run with defaults:
-
-```bash
-uv run python -m src
-```
-
-Run with explicit paths:
-
-```bash
-uv run python -m src \
-  --functions_definition data/input/functions_definition.json \
-  --input data/input/function_calling_tests.json \
-  --output data/output/function_calling_results.json
-```
-
-Read the result:
-
-```bash
-cat data/output/function_calling_results.json
-```
-
 ## Resources
 
 - Project subject: `call_me_maybe.pdf`
@@ -395,19 +427,16 @@ cat data/output/function_calling_results.json
 - Python `json` documentation: https://docs.python.org/3/library/json.html
 - Python `pathlib` documentation: https://docs.python.org/3/library/pathlib.html
 - Qwen model family: https://qwenlm.github.io/
-- Constrained decoding background: JSON/schema-constrained generation and
-  token filtering concepts described in the project subject
 
 ## AI Usage
 
-AI assistance was used for:
+AI assistance was used during implementation for:
 
-- discussing implementation approaches for constrained decoding
-- enumerating and cross-checking the conditional branches required for
-  schema-aware constrained decoding
-- identifying validation gaps against the project subject
-- drafting and refining documentation
-- debugging terminal visualization and CLI behavior
+- exploring the constrained decoding approach required by the subject
+- enumerating the JSON prefix states handled by `JsonValidator`
+- designing schema-aware validation for function names and parameters
+- drafting and refining README explanations and flowcharts
+- debugging CLI error handling and terminal visualization behavior
 
-All code and documentation changes were reviewed, adapted, and tested manually
-before being kept in the repository.
+All generated suggestions were reviewed, adapted, and tested manually before
+being kept in the repository.
