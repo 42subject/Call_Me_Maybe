@@ -88,7 +88,7 @@ def main() -> None:
         qwen_client = QwenClient(paths.model, functions)
         response = qwen_client.generate(prompts)
     except (OSError, RuntimeError, ValueError) as error:
-        print(f"Error: failed to generate responses: {error}")
+        print(f"Error: {error}")
         return
 
     try:

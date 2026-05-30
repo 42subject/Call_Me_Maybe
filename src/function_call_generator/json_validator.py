@@ -69,6 +69,7 @@ class JsonValidator(BaseModel):
     function_parameters: dict[str, dict[str, FunctionParametersModel]] = Field(
         default_factory=dict
     )
+    expected_prompt: str = ""
     text: str = ""
 
     def reset(self) -> None:
@@ -321,6 +322,16 @@ class JsonValidator(BaseModel):
                 and frame["current_key"] == "name"
             )
 
+        def is_prompt_value() -> bool:
+            if not stack:
+                return False
+            frame = stack[-1]
+            return (
+                frame["type"] == FrameType.OBJECT
+                and frame["role"] == FrameRole.RESPONSE
+                and frame["current_key"] == "prompt"
+            )
+
         def is_parameters_value() -> bool:
             if not stack:
                 return False
@@ -330,6 +341,24 @@ class JsonValidator(BaseModel):
                 and frame["role"] == FrameRole.RESPONSE
                 and frame["current_key"] == "parameters"
             )
+
+        def append_response_value(char: str) -> bool:
+            nonlocal value_buffer
+            if not is_prompt_value() and not is_name_value():
+                return True
+            value_buffer += char
+            if (
+                is_prompt_value()
+                and self.expected_prompt
+                and not self.expected_prompt.startswith(value_buffer)
+            ):
+                return False
+            if (
+                is_name_value()
+                and not is_valid_function_name_prefix(value_buffer)
+            ):
+                return False
+            return True
 
         def get_expected_schema() -> FunctionParametersModel | None:
             if not stack:
@@ -523,7 +552,20 @@ class JsonValidator(BaseModel):
                                 | "r"
                                 | "t"
                             ):
-                                pass
+                                escaped_chars = {
+                                    '"': '"',
+                                    "\\": "\\",
+                                    "/": "/",
+                                    "b": "\b",
+                                    "f": "\f",
+                                    "n": "\n",
+                                    "r": "\r",
+                                    "t": "\t",
+                                }
+                                if not append_response_value(
+                                    escaped_chars[char],
+                                ):
+                                    return False
                             case _:
                                 return False
                         escape = unicode_escape_count > 0
@@ -557,6 +599,12 @@ class JsonValidator(BaseModel):
                                 return False
                             if is_name_value():
                                 selected_function_name = value_buffer
+                            if (
+                                is_prompt_value()
+                                and self.expected_prompt
+                                and value_buffer != self.expected_prompt
+                            ):
+                                return False
                             value_finished()
                     elif string_kind == "key":
                         key_buffer += char
@@ -573,10 +621,8 @@ class JsonValidator(BaseModel):
                             return False
                     elif ord(char) < 0x20:
                         return False
-                    elif is_name_value():
-                        value_buffer += char
-                        if not is_valid_function_name_prefix(value_buffer):
-                            return False
+                    elif not append_response_value(char):
+                        return False
                     index += 1
                     continue
 

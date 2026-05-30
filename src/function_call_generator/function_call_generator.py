@@ -261,9 +261,10 @@ class QwenClient(LLMClient):
             ResponseModel: 生成された関数呼び出し結果
         """
         feedbacks: list[str] = []
-        self.visualizer.initialize()
 
         for retry in range(self.MAX_RETRIES):
+            self.visualizer.initialize()
+            self.validator.expected_prompt = prompt.prompt
             self.validator.reset()
             prompt_text: str = self.prompt_builder.build([prompt], feedbacks)
             input_ids = self.tokenizer.encode(prompt_text)
@@ -275,7 +276,9 @@ class QwenClient(LLMClient):
                 )
                 if response_model.prompt != prompt.prompt:
                     raise ValueError(
-                        "response prompt must match the original prompt"
+                        "response prompt must match the original prompt "
+                        f"exactly. Expected: {prompt.prompt!r}. "
+                        f"Got: {response_model.prompt!r}."
                     )
                 print(f"Answer: \n{response_model.model_dump_json()}")
                 return response_model
@@ -283,8 +286,6 @@ class QwenClient(LLMClient):
                 print(
                     f"response validation failed. "
                     f"({retry + 1}/{self.MAX_RETRIES})\n"
-                    "note: response may be truncated; "
-                    f"check MAX_TOKENS ({self.MAX_TOKENS}).\n"
                     f"response: {response_text}"
                 )
                 feedback = str(error)
